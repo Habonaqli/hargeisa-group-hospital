@@ -1,4 +1,4 @@
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 
 const uri = process.env.MONGODB_URI;
 
@@ -10,7 +10,9 @@ if (!uri) {
 }
 
 if (!clientPromise) {
-  client = new MongoClient(uri);
+  client = new MongoClient(uri, {
+    tls: true,
+  });
   clientPromise = client.connect();
 }
 
@@ -42,17 +44,30 @@ async function getBody(req) {
   });
 }
 
+function formatPatient(patient) {
+  return {
+    ...patient,
+    _id: patient._id instanceof ObjectId ? patient._id.toString() : patient._id,
+  };
+}
+
 export default async function handler(req, res) {
   try {
     const client = await clientPromise;
     const db = client.db("hospital");
     const collection = db.collection("patients");
 
+    // GET: fetch all patients
     if (req.method === "GET") {
-      const patients = await collection.find({}).toArray();
-      return res.status(200).json(patients);
+      const patients = await collection
+        .find({})
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      return res.status(200).json(patients.map(formatPatient));
     }
 
+    // POST: add new patient
     if (req.method === "POST") {
       const body = await getBody(req);
 
@@ -62,14 +77,108 @@ export default async function handler(req, res) {
         });
       }
 
-      const result = await collection.insertOne({
-        ...body,
+      const newPatient = {
+        name: body.name || "",
+        age: body.age || "",
+        gender: body.gender || "",
+        phone: body.phone || "",
+        address: body.address || "",
+        department: body.department || "",
+        doctor: body.doctor || "",
+        diagnosis: body.diagnosis || "",
+        status: body.status || "Active",
+        notes: body.notes || "",
         createdAt: new Date(),
-      });
+        updatedAt: new Date(),
+      };
+
+      const result = await collection.insertOne(newPatient);
 
       return res.status(201).json({
         message: "Patient added successfully",
-        insertedId: result.insertedId,
+        patient: {
+          ...newPatient,
+          _id: result.insertedId.toString(),
+        },
+      });
+    }
+
+    // PUT: update patient
+    if (req.method === "PUT") {
+      const body = await getBody(req);
+      const { id, ...updates } = body;
+
+      if (!id) {
+        return res.status(400).json({
+          message: "Patient id is required",
+        });
+      }
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          message: "Invalid patient id",
+        });
+      }
+
+      const allowedUpdates = {
+        name: updates.name || "",
+        age: updates.age || "",
+        gender: updates.gender || "",
+        phone: updates.phone || "",
+        address: updates.address || "",
+        department: updates.department || "",
+        doctor: updates.doctor || "",
+        diagnosis: updates.diagnosis || "",
+        status: updates.status || "Active",
+        notes: updates.notes || "",
+        updatedAt: new Date(),
+      };
+
+      const result = await collection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: allowedUpdates }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json({
+          message: "Patient not found",
+        });
+      }
+
+      return res.status(200).json({
+        message: "Patient updated successfully",
+      });
+    }
+
+    // DELETE: delete patient
+    if (req.method === "DELETE") {
+      const body = await getBody(req);
+      const { id } = body;
+
+      if (!id) {
+        return res.status(400).json({
+          message: "Patient id is required",
+        });
+      }
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          message: "Invalid patient id",
+        });
+      }
+
+      const result = await collection.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      if (result.deletedCount === 0) {
+        return res.status(404).json({
+          message: "Patient not found",
+        });
+      }
+
+      return res.status(200).json({
+        message: "Patient deleted successfully",
       });
     }
 
