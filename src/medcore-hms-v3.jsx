@@ -447,62 +447,327 @@ function Dashboard({ role }) {
 //  PATIENTS  (with detail view)
 // ═══════════════════════════════════════════════════════════════════════════════
 function PatientsPage({ onViewPatient }) {
+  const emptyForm = {
+    name: "",
+    age: "",
+    gender: "",
+    phone: "",
+    address: "",
+    department: "",
+    doctor: "",
+    diagnosis: "",
+    status: "Active",
+    notes: "",
+  };
+
+  const [patients, setPatients] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name:"", dob:"", gender:"", phone:"", blood:"", dept:"", addr:"" });
+  const [editingPatient, setEditingPatient] = useState(null);
+  const [form, setForm] = useState(emptyForm);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const filtered = PATIENTS_DATA.filter(p =>
-    (statusFilter === "all" || p.status === statusFilter) &&
-    Object.values(p).some(v => String(v).toLowerCase().includes(search.toLowerCase()))
-  );
+  const normalizePatient = (patient, index = 0) => ({
+    ...patient,
+    id: patient._id || patient.id || `PT-${String(index + 1).padStart(3, "0")}`,
+    patientCode: patient.patientCode || `PT-${String(index + 1).padStart(3, "0")}`,
+    name: patient.name || "Unnamed Patient",
+    age: patient.age || "",
+    gender: patient.gender || "",
+    phone: patient.phone || "",
+    address: patient.address || patient.addr || "",
+    department: patient.department || patient.dept || "General",
+    dept: patient.department || patient.dept || "General",
+    doctor: patient.doctor || "",
+    diagnosis: patient.diagnosis || "",
+    status: patient.status || "Active",
+    notes: patient.notes || "",
+    dob: patient.dob || (patient.age ? `${patient.age} yrs` : "N/A"),
+    blood: patient.blood || "N/A",
+    visits: patient.visits || 0,
+    insurance: patient.insurance || "N/A",
+    createdAt: patient.createdAt || "",
+  });
+
+  const loadPatients = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/patients");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to load patients");
+      }
+
+      setPatients(Array.isArray(data) ? data.map(normalizePatient) : []);
+    } catch (err) {
+      setError(err.message || "Unable to load patients");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPatients();
+  }, [loadPatients]);
+
+  const filtered = patients.filter((p) => {
+    const matchesStatus = statusFilter === "all" || p.status === statusFilter;
+    const matchesSearch = Object.values(p).some((v) =>
+      String(v || "").toLowerCase().includes(search.toLowerCase())
+    );
+    return matchesStatus && matchesSearch;
+  });
+
+  const activeCount = patients.filter((p) => p.status === "Active").length;
+  const criticalCount = patients.filter((p) => p.status === "Critical").length;
+  const dischargedCount = patients.filter((p) => p.status === "Discharged").length;
+
+  const openAddModal = () => {
+    setEditingPatient(null);
+    setForm(emptyForm);
+    setSuccess("");
+    setError("");
+    setShowModal(true);
+  };
+
+  const openEditModal = (patient) => {
+    setEditingPatient(patient);
+    setForm({
+      name: patient.name || "",
+      age: patient.age || "",
+      gender: patient.gender || "",
+      phone: patient.phone || "",
+      address: patient.address || "",
+      department: patient.department || patient.dept || "",
+      doctor: patient.doctor || "",
+      diagnosis: patient.diagnosis || "",
+      status: patient.status || "Active",
+      notes: patient.notes || "",
+    });
+    setSuccess("");
+    setError("");
+    setShowModal(true);
+  };
+
+  const savePatient = async () => {
+    if (!form.name.trim()) {
+      setError("Patient name is required");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const isEditing = Boolean(editingPatient);
+      const response = await fetch("/api/patients", {
+        method: isEditing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isEditing ? { id: editingPatient.id, ...form } : form),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Patient save failed");
+      }
+
+      setSuccess(isEditing ? "Patient updated successfully" : "Patient added successfully");
+      setShowModal(false);
+      setEditingPatient(null);
+      setForm(emptyForm);
+      await loadPatients();
+    } catch (err) {
+      setError(err.message || "Unable to save patient");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deletePatient = async (patient) => {
+    const ok = window.confirm(`Delete patient record for ${patient.name}?`);
+    if (!ok) return;
+
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("/api/patients", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: patient.id }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Patient delete failed");
+      }
+
+      setSuccess("Patient deleted successfully");
+      await loadPatients();
+    } catch (err) {
+      setError(err.message || "Unable to delete patient");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
-      <SectionHeader title="Patient Registry" subtitle={`${filtered.length} records`}
-        action={<div style={{ display:"flex", gap:10 }}><AmberBtn onClick={() => setShowModal(true)}>+ New Patient</AmberBtn></div>} />
+      <SectionHeader
+        title="Patient Registry"
+        subtitle={`${filtered.length} real patient records from MongoDB`}
+        action={
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <GhostBtn onClick={loadPatients}>Refresh Patients</GhostBtn>
+            <AmberBtn onClick={openAddModal}>+ New Patient</AmberBtn>
+          </div>
+        }
+      />
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:16 }}>
+        <StatCard label="Total Patients" value={patients.length} icon="👥" accent={C.blue} />
+        <StatCard label="Active" value={activeCount} icon="✅" accent={C.green} />
+        <StatCard label="Critical" value={criticalCount} icon="🚨" accent={C.red} />
+        <StatCard label="Discharged" value={dischargedCount} icon="🏁" accent={C.amber} />
+      </div>
+
+      {(error || success) && (
+        <div style={{
+          border:`1px solid ${error ? "rgba(248,113,113,.35)" : "rgba(52,211,153,.35)"}`,
+          background:error ? "rgba(248,113,113,.12)" : "rgba(52,211,153,.12)",
+          color:error ? C.red : C.green,
+          padding:"12px 14px",
+          borderRadius:12,
+          fontFamily:C.mono,
+          fontSize:12,
+        }}>
+          {error ? "❌" : "✅"} {error || success}
+        </div>
+      )}
 
       <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-        <SearchBar value={search} onChange={setSearch} placeholder="Search patients..." />
-        <Select value={statusFilter} onChange={setStatusFilter} options={[{value:"all",label:"All Status"},{value:"Active",label:"Active"},{value:"Inactive",label:"Inactive"}]} />
+        <SearchBar value={search} onChange={setSearch} placeholder="Search real patients..." />
+        <Select
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value:"all", label:"All Status" },
+            { value:"Active", label:"Active" },
+            { value:"Critical", label:"Critical" },
+            { value:"Discharged", label:"Discharged" },
+            { value:"Inactive", label:"Inactive" },
+          ]}
+        />
         <GhostBtn onClick={() => exportCSV(filtered, "patients")}>⬇ Export CSV</GhostBtn>
       </div>
 
       <Card>
-        <DataTable
-          columns={["Patient ID","Name","DOB","Gender","Blood","Department","Visits","Status","Action"]}
-          rows={filtered}
-          renderRow={(p, i) => (
-            <tr key={p.id}>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{p.id}</td>
-              <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{p.name}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.muted}}>{p.dob}</td>
-              <td style={{...td(i), fontSize:13, color:"#CBD5E1"}}>{p.gender}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.amber, fontWeight:700}}>{p.blood}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{p.dept}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.text, textAlign:"center"}}>{p.visits}</td>
-              <td style={td(i)}><Badge status={p.status} /></td>
-              <td style={td(i)}><GhostBtn onClick={() => onViewPatient(p)} color={C.amber}>View →</GhostBtn></td>
-            </tr>
-          )} />
+        {loading ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>Loading real patient records...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>No patients found. Click + New Patient to add one.</div>
+        ) : (
+          <DataTable
+            columns={["Patient ID","Name","Age","Gender","Department","Phone","Diagnosis","Status","Action"]}
+            rows={filtered}
+            renderRow={(p, i) => (
+              <tr key={p.id}>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{p.patientCode}</td>
+                <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{p.name}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.muted}}>{p.age || "N/A"}</td>
+                <td style={{...td(i), fontSize:13, color:"#CBD5E1"}}>{p.gender || "N/A"}</td>
+                <td style={{...td(i), fontSize:12, color:C.muted}}>{p.department || "General"}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{p.phone || "N/A"}</td>
+                <td style={{...td(i), fontSize:12, color:C.muted}}>{p.diagnosis || "N/A"}</td>
+                <td style={td(i)}><Badge status={p.status} /></td>
+                <td style={td(i)}>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                    <GhostBtn onClick={() => onViewPatient(p)} color={C.amber}>View</GhostBtn>
+                    <GhostBtn onClick={() => openEditModal(p)} color={C.blue}>Edit</GhostBtn>
+                    <GhostBtn onClick={() => deletePatient(p)} color={C.red}>Delete</GhostBtn>
+                  </div>
+                </td>
+              </tr>
+            )}
+          />
+        )}
       </Card>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Register New Patient">
+      <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>
+        This page now reads and writes real patient records from MongoDB. Demo patient data is no longer displayed here.
+      </div>
+
+      <Modal open={showModal} onClose={() => setShowModal(false)} title={editingPatient ? "Edit Patient" : "Register New Patient"}>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-          {[["Full Name","name","Amina Hassan"],["Date of Birth","dob","1988-01-01"],["Phone","phone","+252 63 420 0000"],["Address","addr","Hargeisa Zone 1"]].map(([l,k,ph]) => (
-            <FormField key={k} label={l}>
-              <TextInput value={form[k]} onChange={v => setForm(f => ({...f,[k]:v}))} placeholder={ph} />
-            </FormField>
-          ))}
+          <FormField label="Full Name">
+            <TextInput value={form.name} onChange={v => setForm(f => ({...f, name:v}))} placeholder="Ahmed Ali" />
+          </FormField>
+          <FormField label="Age">
+            <TextInput value={form.age} onChange={v => setForm(f => ({...f, age:v}))} placeholder="30" />
+          </FormField>
           <FormField label="Gender">
             <Select value={form.gender} onChange={v => setForm(f=>({...f,gender:v}))} options={[{value:"",label:"Select"},{value:"Male",label:"Male"},{value:"Female",label:"Female"}]} style={{width:"100%"}} />
           </FormField>
-          <FormField label="Blood Group">
-            <Select value={form.blood} onChange={v => setForm(f=>({...f,blood:v}))} options={["","A+","A-","B+","B-","O+","O-","AB+","AB-"].map(b=>({value:b,label:b||"Select"}))} style={{width:"100%"}} />
+          <FormField label="Phone">
+            <TextInput value={form.phone} onChange={v => setForm(f => ({...f, phone:v}))} placeholder="0634000000" />
+          </FormField>
+          <FormField label="Department">
+            <TextInput value={form.department} onChange={v => setForm(f => ({...f, department:v}))} placeholder="Emergency / OPD / Pediatrics" />
+          </FormField>
+          <FormField label="Assigned Doctor">
+            <TextInput value={form.doctor} onChange={v => setForm(f => ({...f, doctor:v}))} placeholder="Dr. Amina Hassan" />
+          </FormField>
+          <FormField label="Status">
+            <Select value={form.status} onChange={v => setForm(f=>({...f,status:v}))} options={["Active","Critical","Discharged","Inactive"].map(s=>({value:s,label:s}))} style={{width:"100%"}} />
+          </FormField>
+          <FormField label="Address">
+            <TextInput value={form.address} onChange={v => setForm(f => ({...f, address:v}))} placeholder="Hargeisa" />
           </FormField>
         </div>
+
+        <div style={{ marginTop:16 }}>
+          <FormField label="Diagnosis">
+            <TextInput value={form.diagnosis} onChange={v => setForm(f => ({...f, diagnosis:v}))} placeholder="Initial diagnosis" />
+          </FormField>
+        </div>
+
+        <div style={{ marginTop:16 }}>
+          <FormField label="Notes">
+            <textarea
+              value={form.notes}
+              onChange={e => setForm(f => ({...f, notes:e.target.value}))}
+              placeholder="Additional clinical notes"
+              style={{
+                width:"100%",
+                minHeight:90,
+                background:"rgba(255,255,255,0.06)",
+                border:`1px solid ${C.border}`,
+                borderRadius:10,
+                padding:"10px 14px",
+                color:C.text,
+                fontFamily:C.mono,
+                fontSize:12,
+                outline:"none",
+                boxSizing:"border-box",
+                resize:"vertical",
+              }}
+            />
+          </FormField>
+        </div>
+
         <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <AmberBtn onClick={() => setShowModal(false)}>Register Patient</AmberBtn>
+          <AmberBtn onClick={savePatient}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</AmberBtn>
           <GhostBtn onClick={() => setShowModal(false)}>Cancel</GhostBtn>
         </div>
       </Modal>
