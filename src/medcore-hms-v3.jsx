@@ -1063,75 +1063,174 @@ function InpatientsPage() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  STAFF / NURSES
+//  STAFF / USERS - REAL DATA FROM MONGODB
 // ═══════════════════════════════════════════════════════════════════════════════
 function StaffPage() {
-  const [search, setSearch] = useState("");
-  const [shiftFilter, setShiftFilter] = useState("all");
-  const [showModal, setShowModal] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [q, setQ] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const filtered = STAFF_DATA.filter(s =>
-    (shiftFilter === "all" || s.shift === shiftFilter) &&
-    Object.values(s).some(v => String(v).toLowerCase().includes(search.toLowerCase()))
-  );
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/users");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to load users");
+      }
+
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.message || "Unable to load staff users");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
+
+  const formatRole = (role = "staff") => {
+    const clean = String(role || "staff").toLowerCase();
+    const map = {
+      admin: "Admin",
+      doctor: "Doctor",
+      nurse: "Nurse",
+      receptionist: "Receptionist",
+      staff: "Staff",
+      pending: "Pending",
+      rejected: "Rejected",
+    };
+    return map[clean] || clean.charAt(0).toUpperCase() + clean.slice(1);
+  };
+
+  const formatDate = (value) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString(undefined, { year:"numeric", month:"short", day:"numeric" });
+  };
+
+  const staffRows = users.map((u, index) => ({
+    id: u._id || u.id || `U-${index + 1}`,
+    name: u.fullName || u.name || "Unnamed User",
+    role: u.role || "staff",
+    roleLabel: formatRole(u.role),
+    phone: u.phone || "—",
+    email: u.email || "—",
+    status: u.status || "Pending Approval",
+    createdAt: u.createdAt,
+  }));
+
+  const filtered = staffRows.filter((s) => {
+    const haystack = `${s.name} ${s.email} ${s.phone} ${s.roleLabel} ${s.status}`.toLowerCase();
+    const matchesSearch = haystack.includes(q.toLowerCase());
+    const matchesRole = roleFilter === "all" || String(s.role).toLowerCase() === roleFilter;
+    const matchesStatus = statusFilter === "all" || s.status === statusFilter;
+    return matchesSearch && matchesRole && matchesStatus;
+  });
+
+  const activeCount = staffRows.filter((s) => s.status === "Active").length;
+  const pendingCount = staffRows.filter((s) => s.status === "Pending Approval").length;
+  const rejectedCount = staffRows.filter((s) => s.status === "Rejected").length;
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
-      <SectionHeader title="Staff & Nurses" subtitle={`${filtered.length} staff members`}
-        action={<AmberBtn onClick={() => setShowModal(true)}>+ Add Staff</AmberBtn>} />
+    <div>
+      <SectionHeader
+        title="Staff & Users"
+        subtitle={`${staffRows.length} real registered users from MongoDB`}
+        action={<AmberBtn onClick={loadUsers}>{loading ? "Loading..." : "Refresh Users"}</AmberBtn>}
+      />
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12 }}>
+      {error && (
+        <div style={{
+          background:"rgba(248,113,113,0.12)",
+          border:"1px solid rgba(248,113,113,0.35)",
+          color:C.red,
+          padding:"12px 14px",
+          borderRadius:12,
+          fontFamily:C.mono,
+          fontSize:12,
+          marginBottom:16,
+        }}>
+          ❌ {error}
+        </div>
+      )}
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:20 }}>
         {[
-          {label:"Total Staff",  val:STAFF_DATA.length,                               color:C.blue },
-          {label:"Active",       val:STAFF_DATA.filter(s=>s.status==="Active").length, color:C.green},
-          {label:"On Leave",     val:STAFF_DATA.filter(s=>s.status==="On Leave").length,color:C.amber},
-        ].map(s => (
-          <Card key={s.label} style={{ padding:"16px 20px" }}>
-            <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>{s.label}</div>
-            <div style={{ fontFamily:C.serif, fontSize:26, color:s.color, fontWeight:700 }}>{s.val}</div>
+          { label:"Total Users", val:staffRows.length, color:C.blue, icon:"👥" },
+          { label:"Active", val:activeCount, color:C.green, icon:"✅" },
+          { label:"Pending Approval", val:pendingCount, color:C.amber, icon:"⏳" },
+          { label:"Rejected", val:rejectedCount, color:C.red, icon:"⛔" },
+        ].map((s) => (
+          <Card key={s.label} style={{ padding:22, borderBottom:`2px solid ${s.color}` }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:".08em" }}>{s.label}</div>
+                <div style={{ fontFamily:C.serif, fontSize:30, color:s.color, marginTop:8 }}>{s.val}</div>
+              </div>
+              <div style={{ fontSize:24, opacity:.75 }}>{s.icon}</div>
+            </div>
           </Card>
         ))}
       </div>
 
-      <div style={{ display:"flex", gap:10 }}>
-        <SearchBar value={search} onChange={setSearch} placeholder="Search staff..." />
-        <Select value={shiftFilter} onChange={setShiftFilter} options={[{value:"all",label:"All Shifts"},{value:"Morning",label:"Morning"},{value:"Evening",label:"Evening"},{value:"Night",label:"Night"}]} />
-        <GhostBtn onClick={() => exportCSV(filtered,"staff")}>⬇ Export</GhostBtn>
+      <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
+        <SearchBar value={q} onChange={setQ} placeholder="Search real staff..." />
+        <Select
+          value={roleFilter}
+          onChange={setRoleFilter}
+          options={[
+            { value:"all", label:"All Roles" },
+            { value:"admin", label:"Admin" },
+            { value:"doctor", label:"Doctor" },
+            { value:"nurse", label:"Nurse" },
+            { value:"receptionist", label:"Receptionist" },
+            { value:"staff", label:"Staff" },
+          ]}
+        />
+        <Select
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value:"all", label:"All Statuses" },
+            { value:"Active", label:"Active" },
+            { value:"Pending Approval", label:"Pending Approval" },
+            { value:"Rejected", label:"Rejected" },
+          ]}
+        />
+        <GhostBtn onClick={() => exportCSV(filtered, "real-staff-users")}>⬇ Export</GhostBtn>
       </div>
 
       <Card>
         <DataTable
-          columns={["Staff ID","Name","Role","Department","Shift","Phone","Attendance","Status"]}
+          columns={["User ID", "Name", "Role", "Email", "Phone", "Registered", "Status"]}
           rows={filtered}
-          renderRow={(s,i) => (
+          renderRow={(s, i) => (
             <tr key={s.id}>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{s.id}</td>
-              <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{s.name}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{s.role}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{s.dept}</td>
-              <td style={{...td(i)}}>
-                <span style={{ fontFamily:C.mono, fontSize:11, color: s.shift==="Morning" ? C.amber : s.shift==="Evening" ? C.blue : C.purple, background:"rgba(255,255,255,0.04)", padding:"2px 8px", borderRadius:6 }}>{s.shift}</span>
-              </td>
+              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.blue, maxWidth:170, overflow:"hidden", textOverflow:"ellipsis"}}>{s.id}</td>
+              <td style={{...td(i), color:C.text, fontSize:13, fontWeight:600}}>{s.name}</td>
+              <td style={{...td(i), fontSize:12, color:C.text}}>{s.roleLabel}</td>
+              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.blue}}>{s.email}</td>
               <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{s.phone}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color: parseInt(s.attendance) >= 95 ? C.green : parseInt(s.attendance) >= 90 ? C.amber : C.red, fontWeight:700}}>{s.attendance}</td>
+              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{formatDate(s.createdAt)}</td>
               <td style={td(i)}><Badge status={s.status} /></td>
             </tr>
-          )} />
+          )}
+        />
       </Card>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Staff Member">
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-          {[["Full Name",""],["Role","e.g. Staff Nurse"],["Phone",""],["Email",""]].map(([l,ph]) => (
-            <FormField key={l} label={l}><TextInput value="" onChange={() => {}} placeholder={ph} /></FormField>
-          ))}
-          <FormField label="Department"><Select value="" onChange={() => {}} options={[{value:"",label:"Select dept"},...["Cardiology","Pediatrics","ICU","Pharmacy","Laboratory","Admin"].map(d=>({value:d,label:d}))]} style={{width:"100%"}} /></FormField>
-          <FormField label="Shift"><Select value="" onChange={() => {}} options={[{value:"",label:"Select shift"},{value:"Morning",label:"Morning"},{value:"Evening",label:"Evening"},{value:"Night",label:"Night"}]} style={{width:"100%"}} /></FormField>
-        </div>
-        <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <AmberBtn onClick={() => setShowModal(false)}>Add Staff</AmberBtn>
-          <GhostBtn onClick={() => setShowModal(false)}>Cancel</GhostBtn>
-        </div>
-      </Modal>
+      <div style={{ marginTop:14, color:C.muted, fontFamily:C.mono, fontSize:11 }}>
+        This page now reads from MongoDB users. Demo staff data is no longer displayed here.
+      </div>
     </div>
   );
 }
