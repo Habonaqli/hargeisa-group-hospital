@@ -448,6 +448,7 @@ function Dashboard({ role }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function PatientsPage({ onViewPatient }) {
   const emptyForm = {
+    id: "",
     name: "",
     age: "",
     gender: "",
@@ -463,51 +464,51 @@ function PatientsPage({ onViewPatient }) {
   const [patients, setPatients] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [showModal, setShowModal] = useState(false);
-  const [editingPatient, setEditingPatient] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
 
-  const normalizePatient = (patient, index = 0) => ({
-    ...patient,
-    id: patient._id || patient.id || `PT-${String(index + 1).padStart(3, "0")}`,
-    patientCode: patient.patientCode || `PT-${String(index + 1).padStart(3, "0")}`,
-    name: patient.name || "Unnamed Patient",
-    age: patient.age || "",
-    gender: patient.gender || "",
-    phone: patient.phone || "",
-    address: patient.address || patient.addr || "",
-    department: patient.department || patient.dept || "General",
-    dept: patient.department || patient.dept || "General",
-    doctor: patient.doctor || "",
-    diagnosis: patient.diagnosis || "",
-    status: patient.status || "Active",
-    notes: patient.notes || "",
-    dob: patient.dob || (patient.age ? `${patient.age} yrs` : "N/A"),
-    blood: patient.blood || "N/A",
-    visits: patient.visits || 0,
-    insurance: patient.insurance || "N/A",
-    createdAt: patient.createdAt || "",
-  });
+  const normalizePatient = (patient, index = 0) => {
+    const id = patient._id || patient.id || `PT-${String(index + 1).padStart(3, "0")}`;
+    return {
+      ...patient,
+      id,
+      patientCode: patient.patientCode || `PT-${String(index + 1).padStart(3, "0")}`,
+      name: patient.name || "Unnamed Patient",
+      age: patient.age || "",
+      gender: patient.gender || "",
+      phone: patient.phone || "",
+      address: patient.address || patient.addr || "",
+      addr: patient.address || patient.addr || "",
+      department: patient.department || patient.dept || "General",
+      dept: patient.department || patient.dept || "General",
+      doctor: patient.doctor || "",
+      diagnosis: patient.diagnosis || "",
+      status: patient.status || "Active",
+      notes: patient.notes || "",
+      dob: patient.dob || (patient.age ? `${patient.age} yrs` : "N/A"),
+      blood: patient.blood || "N/A",
+      visits: patient.visits || 0,
+      insurance: patient.insurance || "N/A",
+      createdAt: patient.createdAt || "",
+    };
+  };
 
   const loadPatients = useCallback(async () => {
     setLoading(true);
     setError("");
-
     try {
       const response = await fetch("/api/patients");
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to load patients");
-      }
-
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : [];
+      if (!response.ok) throw new Error(data.message || "Failed to load patients");
       setPatients(Array.isArray(data) ? data.map(normalizePatient) : []);
     } catch (err) {
       setError(err.message || "Unable to load patients");
+      setPatients([]);
     } finally {
       setLoading(false);
     }
@@ -517,43 +518,39 @@ function PatientsPage({ onViewPatient }) {
     loadPatients();
   }, [loadPatients]);
 
-  const filtered = patients.filter((p) => {
-    const matchesStatus = statusFilter === "all" || p.status === statusFilter;
-    const matchesSearch = Object.values(p).some((v) =>
-      String(v || "").toLowerCase().includes(search.toLowerCase())
-    );
-    return matchesStatus && matchesSearch;
-  });
-
-  const activeCount = patients.filter((p) => p.status === "Active").length;
-  const criticalCount = patients.filter((p) => p.status === "Critical").length;
-  const dischargedCount = patients.filter((p) => p.status === "Discharged").length;
-
-  const openAddModal = () => {
-    setEditingPatient(null);
-    setForm(emptyForm);
-    setSuccess("");
-    setError("");
-    setShowModal(true);
+  const updateForm = (key, value) => {
+    setForm((f) => ({ ...f, [key]: value }));
   };
 
-  const openEditModal = (patient) => {
-    setEditingPatient(patient);
+  const resetForm = () => {
+    setForm(emptyForm);
+    setFormOpen(false);
+  };
+
+  const addPatient = () => {
+    setMessage("");
+    setError("");
+    setForm(emptyForm);
+    setFormOpen(true);
+  };
+
+  const editPatient = (patient) => {
+    setMessage("");
+    setError("");
     setForm({
+      id: patient.id,
       name: patient.name || "",
       age: patient.age || "",
       gender: patient.gender || "",
       phone: patient.phone || "",
       address: patient.address || "",
-      department: patient.department || patient.dept || "",
+      department: patient.department || "",
       doctor: patient.doctor || "",
       diagnosis: patient.diagnosis || "",
       status: patient.status || "Active",
       notes: patient.notes || "",
     });
-    setSuccess("");
-    setError("");
-    setShowModal(true);
+    setFormOpen(true);
   };
 
   const savePatient = async () => {
@@ -564,26 +561,21 @@ function PatientsPage({ onViewPatient }) {
 
     setSaving(true);
     setError("");
-    setSuccess("");
+    setMessage("");
 
     try {
-      const isEditing = Boolean(editingPatient);
+      const isEditing = Boolean(form.id);
+      const payload = isEditing ? { ...form, id: form.id } : { ...form };
       const response = await fetch("/api/patients", {
         method: isEditing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isEditing ? { id: editingPatient.id, ...form } : form),
+        body: JSON.stringify(payload),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Patient save failed");
-      }
-
-      setSuccess(isEditing ? "Patient updated successfully" : "Patient added successfully");
-      setShowModal(false);
-      setEditingPatient(null);
-      setForm(emptyForm);
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Patient save failed");
+      setMessage(isEditing ? "Patient updated successfully" : "Patient added successfully");
+      resetForm();
       await loadPatients();
     } catch (err) {
       setError(err.message || "Unable to save patient");
@@ -593,27 +585,20 @@ function PatientsPage({ onViewPatient }) {
   };
 
   const deletePatient = async (patient) => {
-    const ok = window.confirm(`Delete patient record for ${patient.name}?`);
-    if (!ok) return;
-
+    if (!window.confirm(`Delete patient record for ${patient.name}?`)) return;
     setSaving(true);
     setError("");
-    setSuccess("");
-
+    setMessage("");
     try {
       const response = await fetch("/api/patients", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: patient.id }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Patient delete failed");
-      }
-
-      setSuccess("Patient deleted successfully");
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Patient delete failed");
+      setMessage("Patient deleted successfully");
       await loadPatients();
     } catch (err) {
       setError(err.message || "Unable to delete patient");
@@ -622,155 +607,158 @@ function PatientsPage({ onViewPatient }) {
     }
   };
 
+  const filtered = patients.filter((p) => {
+    const byStatus = statusFilter === "all" || p.status === statusFilter;
+    const q = search.toLowerCase();
+    const bySearch = [p.name, p.phone, p.department, p.doctor, p.diagnosis, p.status]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+    return byStatus && bySearch;
+  });
+
+  const activeCount = patients.filter((p) => p.status === "Active").length;
+  const criticalCount = patients.filter((p) => p.status === "Critical").length;
+  const dischargedCount = patients.filter((p) => p.status === "Discharged").length;
+
+  const inputStyle = {
+    width: "100%",
+    background: "rgba(255,255,255,0.06)",
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+    color: C.text,
+    fontFamily: C.mono,
+    fontSize: 12,
+    outline: "none",
+  };
+
+  const labelStyle = {
+    fontFamily: C.mono,
+    fontSize: 10,
+    color: C.muted,
+    letterSpacing: ".08em",
+    textTransform: "uppercase",
+    marginBottom: 6,
+  };
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <SectionHeader
         title="Patient Registry"
         subtitle={`${filtered.length} real patient records from MongoDB`}
         action={
-          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <GhostBtn onClick={loadPatients}>Refresh Patients</GhostBtn>
-            <AmberBtn onClick={openAddModal}>+ New Patient</AmberBtn>
+            <AmberBtn onClick={addPatient}>+ New Patient</AmberBtn>
           </div>
         }
       />
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
         <StatCard label="Total Patients" value={patients.length} icon="👥" accent={C.blue} />
         <StatCard label="Active" value={activeCount} icon="✅" accent={C.green} />
         <StatCard label="Critical" value={criticalCount} icon="🚨" accent={C.red} />
         <StatCard label="Discharged" value={dischargedCount} icon="🏁" accent={C.amber} />
       </div>
 
-      {(error || success) && (
+      {(message || error) && (
         <div style={{
-          border:`1px solid ${error ? "rgba(248,113,113,.35)" : "rgba(52,211,153,.35)"}`,
-          background:error ? "rgba(248,113,113,.12)" : "rgba(52,211,153,.12)",
-          color:error ? C.red : C.green,
-          padding:"12px 14px",
-          borderRadius:12,
-          fontFamily:C.mono,
-          fontSize:12,
+          border: `1px solid ${error ? "rgba(248,113,113,.35)" : "rgba(52,211,153,.35)"}`,
+          background: error ? "rgba(248,113,113,.12)" : "rgba(52,211,153,.12)",
+          color: error ? C.red : C.green,
+          padding: "12px 14px",
+          borderRadius: 12,
+          fontFamily: C.mono,
+          fontSize: 12,
         }}>
-          {error ? "❌" : "✅"} {error || success}
+          {error ? "❌" : "✅"} {error || message}
         </div>
       )}
 
-      <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+      {formOpen && (
+        <Card style={{ padding: 20 }}>
+          <div style={{ fontFamily: C.serif, fontSize: 20, color: C.text, fontWeight: 700, marginBottom: 16 }}>
+            {form.id ? "Edit Patient" : "Register New Patient"}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
+            <div><div style={labelStyle}>Full Name</div><input style={inputStyle} value={form.name} onChange={(e) => updateForm("name", e.target.value)} placeholder="Ahmed Ali" /></div>
+            <div><div style={labelStyle}>Age</div><input style={inputStyle} value={form.age} onChange={(e) => updateForm("age", e.target.value)} placeholder="30" /></div>
+            <div><div style={labelStyle}>Gender</div><select style={inputStyle} value={form.gender} onChange={(e) => updateForm("gender", e.target.value)}><option value="">Select</option><option value="Male">Male</option><option value="Female">Female</option></select></div>
+            <div><div style={labelStyle}>Phone</div><input style={inputStyle} value={form.phone} onChange={(e) => updateForm("phone", e.target.value)} placeholder="0634000000" /></div>
+            <div><div style={labelStyle}>Department</div><input style={inputStyle} value={form.department} onChange={(e) => updateForm("department", e.target.value)} placeholder="Emergency" /></div>
+            <div><div style={labelStyle}>Assigned Doctor</div><input style={inputStyle} value={form.doctor} onChange={(e) => updateForm("doctor", e.target.value)} placeholder="Dr. Amina" /></div>
+            <div><div style={labelStyle}>Status</div><select style={inputStyle} value={form.status} onChange={(e) => updateForm("status", e.target.value)}><option value="Active">Active</option><option value="Critical">Critical</option><option value="Discharged">Discharged</option><option value="Inactive">Inactive</option></select></div>
+            <div><div style={labelStyle}>Address</div><input style={inputStyle} value={form.address} onChange={(e) => updateForm("address", e.target.value)} placeholder="Hargeisa" /></div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+            <div><div style={labelStyle}>Diagnosis</div><input style={inputStyle} value={form.diagnosis} onChange={(e) => updateForm("diagnosis", e.target.value)} placeholder="Initial diagnosis" /></div>
+            <div><div style={labelStyle}>Notes</div><input style={inputStyle} value={form.notes} onChange={(e) => updateForm("notes", e.target.value)} placeholder="Clinical notes" /></div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <AmberBtn onClick={savePatient}>{saving ? "Saving..." : form.id ? "Update Patient" : "Register Patient"}</AmberBtn>
+            <GhostBtn onClick={resetForm}>Cancel</GhostBtn>
+          </div>
+        </Card>
+      )}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <SearchBar value={search} onChange={setSearch} placeholder="Search real patients..." />
-        <Select
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={[
-            { value:"all", label:"All Status" },
-            { value:"Active", label:"Active" },
-            { value:"Critical", label:"Critical" },
-            { value:"Discharged", label:"Discharged" },
-            { value:"Inactive", label:"Inactive" },
-          ]}
-        />
+        <select style={{ ...inputStyle, width: 180 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="all">All Status</option>
+          <option value="Active">Active</option>
+          <option value="Critical">Critical</option>
+          <option value="Discharged">Discharged</option>
+          <option value="Inactive">Inactive</option>
+        </select>
         <GhostBtn onClick={() => exportCSV(filtered, "patients")}>⬇ Export CSV</GhostBtn>
       </div>
 
       <Card>
         {loading ? (
-          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>Loading real patient records...</div>
+          <div style={{ padding: 28, color: C.muted, fontFamily: C.mono }}>Loading real patient records...</div>
         ) : filtered.length === 0 ? (
-          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>No patients found. Click + New Patient to add one.</div>
+          <div style={{ padding: 28, color: C.muted, fontFamily: C.mono }}>No patients found. Click + New Patient to add one.</div>
         ) : (
-          <DataTable
-            columns={["Patient ID","Name","Age","Gender","Department","Phone","Diagnosis","Status","Action"]}
-            rows={filtered}
-            renderRow={(p, i) => (
-              <tr key={p.id}>
-                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{p.patientCode}</td>
-                <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{p.name}</td>
-                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.muted}}>{p.age || "N/A"}</td>
-                <td style={{...td(i), fontSize:13, color:"#CBD5E1"}}>{p.gender || "N/A"}</td>
-                <td style={{...td(i), fontSize:12, color:C.muted}}>{p.department || "General"}</td>
-                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{p.phone || "N/A"}</td>
-                <td style={{...td(i), fontSize:12, color:C.muted}}>{p.diagnosis || "N/A"}</td>
-                <td style={td(i)}><Badge status={p.status} /></td>
-                <td style={td(i)}>
-                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                    <GhostBtn onClick={() => onViewPatient(p)} color={C.amber}>View</GhostBtn>
-                    <GhostBtn onClick={() => openEditModal(p)} color={C.blue}>Edit</GhostBtn>
-                    <GhostBtn onClick={() => deletePatient(p)} color={C.red}>Delete</GhostBtn>
-                  </div>
-                </td>
-              </tr>
-            )}
-          />
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "rgba(0,0,0,0.2)" }}>
+                  {["Patient ID", "Name", "Age", "Gender", "Department", "Phone", "Diagnosis", "Status", "Action"].map((h) => (
+                    <th key={h} style={{ padding: "11px 16px", textAlign: "left", fontSize: 10, color: C.faint, fontFamily: C.mono, letterSpacing: ".08em", textTransform: "uppercase" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((p, i) => (
+                  <tr key={p.id}>
+                    <td style={{ ...td(i), color: C.blue, fontFamily: C.mono, fontSize: 12 }}>{p.patientCode}</td>
+                    <td style={{ ...td(i), color: C.text, fontWeight: 600 }}>{p.name}</td>
+                    <td style={{ ...td(i), color: C.muted, fontFamily: C.mono }}>{p.age || "N/A"}</td>
+                    <td style={{ ...td(i), color: C.muted }}>{p.gender || "N/A"}</td>
+                    <td style={{ ...td(i), color: C.muted }}>{p.department || "General"}</td>
+                    <td style={{ ...td(i), color: C.blue, fontFamily: C.mono }}>{p.phone || "N/A"}</td>
+                    <td style={{ ...td(i), color: C.muted }}>{p.diagnosis || "N/A"}</td>
+                    <td style={td(i)}><Badge status={p.status} /></td>
+                    <td style={td(i)}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <GhostBtn onClick={() => onViewPatient && onViewPatient(p)} color={C.amber}>View</GhostBtn>
+                        <GhostBtn onClick={() => editPatient(p)} color={C.blue}>Edit</GhostBtn>
+                        <GhostBtn onClick={() => deletePatient(p)} color={C.red}>Delete</GhostBtn>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
 
-      <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>
+      <div style={{ fontFamily: C.mono, fontSize: 11, color: C.muted }}>
         This page now reads and writes real patient records from MongoDB. Demo patient data is no longer displayed here.
       </div>
-
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={editingPatient ? "Edit Patient" : "Register New Patient"}>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-          <FormField label="Full Name">
-            <TextInput value={form.name} onChange={v => setForm(f => ({...f, name:v}))} placeholder="Ahmed Ali" />
-          </FormField>
-          <FormField label="Age">
-            <TextInput value={form.age} onChange={v => setForm(f => ({...f, age:v}))} placeholder="30" />
-          </FormField>
-          <FormField label="Gender">
-            <Select value={form.gender} onChange={v => setForm(f=>({...f,gender:v}))} options={[{value:"",label:"Select"},{value:"Male",label:"Male"},{value:"Female",label:"Female"}]} style={{width:"100%"}} />
-          </FormField>
-          <FormField label="Phone">
-            <TextInput value={form.phone} onChange={v => setForm(f => ({...f, phone:v}))} placeholder="0634000000" />
-          </FormField>
-          <FormField label="Department">
-            <TextInput value={form.department} onChange={v => setForm(f => ({...f, department:v}))} placeholder="Emergency / OPD / Pediatrics" />
-          </FormField>
-          <FormField label="Assigned Doctor">
-            <TextInput value={form.doctor} onChange={v => setForm(f => ({...f, doctor:v}))} placeholder="Dr. Amina Hassan" />
-          </FormField>
-          <FormField label="Status">
-            <Select value={form.status} onChange={v => setForm(f=>({...f,status:v}))} options={["Active","Critical","Discharged","Inactive"].map(s=>({value:s,label:s}))} style={{width:"100%"}} />
-          </FormField>
-          <FormField label="Address">
-            <TextInput value={form.address} onChange={v => setForm(f => ({...f, address:v}))} placeholder="Hargeisa" />
-          </FormField>
-        </div>
-
-        <div style={{ marginTop:16 }}>
-          <FormField label="Diagnosis">
-            <TextInput value={form.diagnosis} onChange={v => setForm(f => ({...f, diagnosis:v}))} placeholder="Initial diagnosis" />
-          </FormField>
-        </div>
-
-        <div style={{ marginTop:16 }}>
-          <FormField label="Notes">
-            <textarea
-              value={form.notes}
-              onChange={e => setForm(f => ({...f, notes:e.target.value}))}
-              placeholder="Additional clinical notes"
-              style={{
-                width:"100%",
-                minHeight:90,
-                background:"rgba(255,255,255,0.06)",
-                border:`1px solid ${C.border}`,
-                borderRadius:10,
-                padding:"10px 14px",
-                color:C.text,
-                fontFamily:C.mono,
-                fontSize:12,
-                outline:"none",
-                boxSizing:"border-box",
-                resize:"vertical",
-              }}
-            />
-          </FormField>
-        </div>
-
-        <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <AmberBtn onClick={savePatient}>{saving ? "Saving..." : editingPatient ? "Update Patient" : "Register Patient"}</AmberBtn>
-          <GhostBtn onClick={() => setShowModal(false)}>Cancel</GhostBtn>
-        </div>
-      </Modal>
     </div>
   );
 }
