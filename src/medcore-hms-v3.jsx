@@ -168,6 +168,8 @@ const STATUS_MAP = {
   "Abnormal":     { bg:"rgba(248,113,113,0.15)", color:"#F87171", label:"Abnormal"     },
   "Fracture":     { bg:"rgba(248,113,113,0.15)", color:"#F87171", label:"Fracture"     },
   "Pending":      { bg:"rgba(96,165,250,0.15)",  color:"#60A5FA", label:"Pending"      },
+  "Pending Approval": { bg:"rgba(251,191,36,0.15)", color:"#FBBF24", label:"Pending Approval" },
+  "Rejected":     { bg:"rgba(248,113,113,0.15)", color:"#F87171", label:"Rejected"     },
 };
 
 // ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
@@ -1708,6 +1710,238 @@ function SettingsPage() {
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  USER APPROVALS PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+function UserApprovalsPage() {
+  const ROLE_OPTIONS = [
+    { value:"staff", label:"Staff" },
+    { value:"doctor", label:"Doctor" },
+    { value:"nurse", label:"Nurse" },
+    { value:"receptionist", label:"Receptionist" },
+    { value:"admin", label:"Admin" },
+  ];
+
+  const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/users");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to load users");
+      }
+
+      setUsers(Array.isArray(data) ? data : []);
+      setRoles((current) => {
+        const next = { ...current };
+        (Array.isArray(data) ? data : []).forEach((u) => {
+          if (!next[u._id]) next[u._id] = u.role && u.role !== "pending" && u.role !== "rejected" ? u.role : "staff";
+        });
+        return next;
+      });
+    } catch (err) {
+      setError(err.message || "Unable to load users");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
+
+  const updateRole = (userId, role) => {
+    setRoles((r) => ({ ...r, [userId]: role }));
+  };
+
+  const submitAction = async (userId, action) => {
+    setBusyId(`${action}-${userId}`);
+    setMessage("");
+    setError("");
+
+    try {
+      const body = {
+        userId,
+        action,
+        role: action === "approve" ? (roles[userId] || "staff") : "staff",
+      };
+
+      const response = await fetch("/api/approve-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Action failed");
+      }
+
+      setMessage(data.message || (action === "approve" ? "User approved successfully" : "User rejected successfully"));
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const normalizedSearch = search.trim().toLowerCase();
+
+  const filteredUsers = users.filter((u) => {
+    const matchesSearch = !normalizedSearch || [u.fullName, u.email, u.phone, u.role, u.status]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(normalizedSearch));
+
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "pending" && u.status === "Pending Approval") ||
+      (statusFilter === "active" && u.status === "Active") ||
+      (statusFilter === "rejected" && u.status === "Rejected");
+
+    return matchesSearch && matchesStatus;
+  });
+
+  const pendingCount = users.filter((u) => u.status === "Pending Approval").length;
+  const activeCount = users.filter((u) => u.status === "Active").length;
+  const rejectedCount = users.filter((u) => u.status === "Rejected").length;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+      <SectionHeader
+        title="User Approvals"
+        subtitle="Review staff registration requests, approve users, reject users, and assign roles."
+        action={<AmberBtn onClick={loadUsers}>Refresh Users</AmberBtn>}
+      />
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14 }}>
+        {[
+          { label:"Pending Approval", value:pendingCount, icon:"⏳", color:C.amber },
+          { label:"Active Users", value:activeCount, icon:"✅", color:C.green },
+          { label:"Rejected", value:rejectedCount, icon:"⛔", color:C.red },
+        ].map((s) => (
+          <Card key={s.label} style={{ padding:"20px 22px", position:"relative", overflow:"hidden" }}>
+            <div style={{ position:"absolute", top:16, right:18, fontSize:24, opacity:.42 }}>{s.icon}</div>
+            <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, letterSpacing:".08em", textTransform:"uppercase", marginBottom:10 }}>{s.label}</div>
+            <div style={{ fontFamily:C.serif, fontSize:30, fontWeight:700, color:C.text, lineHeight:1 }}>{s.value}</div>
+            <div style={{ position:"absolute", bottom:0, left:0, right:0, height:2, background:`linear-gradient(90deg,${s.color}66,transparent)` }} />
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <div style={{ padding:"16px 20px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+          <div>
+            <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:".06em" }}>Registered Users</div>
+            <div style={{ fontSize:12, color:C.faint, marginTop:4 }}>Passwords are hidden. Only approval status and role are shown.</div>
+          </div>
+          <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+            <SearchBar value={search} onChange={setSearch} placeholder="Search users..." width={240} />
+            <Select
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value:"all", label:"All Statuses" },
+                { value:"pending", label:"Pending" },
+                { value:"active", label:"Active" },
+                { value:"rejected", label:"Rejected" },
+              ]}
+            />
+          </div>
+        </div>
+
+        {message && (
+          <div style={{ margin:"14px 20px 0", background:"rgba(52,211,153,0.12)", border:"1px solid rgba(52,211,153,0.35)", color:C.green, padding:"10px 14px", borderRadius:10, fontFamily:C.mono, fontSize:12 }}>
+            ✅ {message}
+          </div>
+        )}
+
+        {error && (
+          <div style={{ margin:"14px 20px 0", background:"rgba(248,113,113,0.12)", border:"1px solid rgba(248,113,113,0.35)", color:C.red, padding:"10px 14px", borderRadius:10, fontFamily:C.mono, fontSize:12 }}>
+            ❌ {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div style={{ padding:48, textAlign:"center", color:C.muted, fontFamily:C.mono, fontSize:13 }}>Loading registered users...</div>
+        ) : (
+          <DataTable
+            columns={["Name", "Contact", "Requested", "Status", "Role", "Action"]}
+            rows={filteredUsers}
+            pageSize={10}
+            renderRow={(u, i) => {
+              const isPending = u.status === "Pending Approval";
+              const created = u.createdAt ? new Date(u.createdAt).toLocaleString() : "—";
+              return (
+                <tr key={u._id}>
+                  <td style={td(i)}>
+                    <div style={{ color:C.text, fontSize:13, fontWeight:600 }}>{u.fullName || "Unnamed User"}</div>
+                    <div style={{ color:C.faint, fontSize:10, fontFamily:C.mono, marginTop:3 }}>ID: {u._id}</div>
+                  </td>
+                  <td style={td(i)}>
+                    <div style={{ color:C.blue, fontSize:12, fontFamily:C.mono }}>{u.email || "—"}</div>
+                    <div style={{ color:C.muted, fontSize:11, marginTop:3 }}>{u.phone || "—"}</div>
+                  </td>
+                  <td style={{ ...td(i), color:C.muted, fontSize:11, fontFamily:C.mono }}>{created}</td>
+                  <td style={td(i)}><Badge status={u.status || "Pending"} /></td>
+                  <td style={td(i)}>
+                    {isPending ? (
+                      <Select
+                        value={roles[u._id] || "staff"}
+                        onChange={(role) => updateRole(u._id, role)}
+                        options={ROLE_OPTIONS}
+                        style={{ minWidth:145 }}
+                      />
+                    ) : (
+                      <span style={{ color:C.text, fontFamily:C.mono, fontSize:12, textTransform:"capitalize" }}>{u.role || "—"}</span>
+                    )}
+                  </td>
+                  <td style={td(i)}>
+                    {isPending ? (
+                      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                        <button
+                          onClick={() => submitAction(u._id, "approve")}
+                          disabled={Boolean(busyId)}
+                          style={{ background:C.green, border:"none", borderRadius:8, padding:"7px 12px", color:"#06281D", fontFamily:C.mono, fontSize:11, fontWeight:800, cursor:busyId ? "not-allowed" : "pointer" }}
+                        >
+                          {busyId === `approve-${u._id}` ? "Approving..." : "Approve"}
+                        </button>
+                        <button
+                          onClick={() => submitAction(u._id, "reject")}
+                          disabled={Boolean(busyId)}
+                          style={{ background:"rgba(248,113,113,0.14)", border:"1px solid rgba(248,113,113,0.35)", borderRadius:8, padding:"7px 12px", color:C.red, fontFamily:C.mono, fontSize:11, fontWeight:800, cursor:busyId ? "not-allowed" : "pointer" }}
+                        >
+                          {busyId === `reject-${u._id}` ? "Rejecting..." : "Reject"}
+                        </button>
+                      </div>
+                    ) : (
+                      <span style={{ color:C.faint, fontFamily:C.mono, fontSize:11 }}>No action needed</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            }}
+          />
+        )}
+      </Card>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  NAV CONFIG + RBAC
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1721,6 +1955,7 @@ const ALL_NAV = [
   { id:"laboratory",    label:"Laboratory",       icon:"🔬", roles:["admin","doctor","nurse"] },
   { id:"pharmacy",      label:"Pharmacy",         icon:"💉", roles:["admin","receptionist","nurse"] },
   { id:"staff",         label:"Staff",            icon:"👔", roles:["admin"] },
+  { id:"approvals",     label:"User Approvals",   icon:"✅", roles:["admin"] },
   { id:"doctors",       label:"Doctors",          icon:"🩺", roles:["admin","receptionist"] },
   { id:"billing",       label:"Billing",          icon:"💳", roles:["admin","receptionist"] },
   { id:"reports",       label:"Reports",          icon:"📊", roles:["admin"] },
@@ -1733,7 +1968,7 @@ const PAGE_TITLES = {
   appointments:"Appointment Schedule", billing:"Billing & Invoices", pharmacy:"Pharmacy & Inventory",
   laboratory:"Laboratory", inpatients:"Inpatient Management", staff:"Staff & Nurses",
   prescriptions:"Prescriptions", emergency:"Emergency Triage", reports:"Reports & Analytics",
-  notifications:"Notification Center", settings:"Settings", patient_profile:"Patient Profile",
+  notifications:"Notification Center", settings:"Settings", approvals:"User Approvals", patient_profile:"Patient Profile",
 };
 
 
@@ -1995,6 +2230,7 @@ export default function App() {
       case "laboratory":    return <LaboratoryPage />;
       case "inpatients":    return <InpatientsPage />;
       case "staff":         return <StaffPage />;
+      case "approvals":     return <UserApprovalsPage />;
       case "prescriptions": return <PrescriptionsPage />;
       case "emergency":     return <EmergencyPage />;
       case "reports":       return <ReportsPage />;
