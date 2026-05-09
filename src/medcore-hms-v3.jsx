@@ -189,7 +189,62 @@ function Card({ children, style = {} }) {
     </div>
   );
 }
+function StatCard({ label, value, icon, accent = C.blue }) {
+  return (
+    <Card
+      style={{
+        padding: 22,
+        minHeight: 95,
+        borderBottom: `2px solid ${accent}`,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontFamily: C.mono,
+              fontSize: 11,
+              textTransform: "uppercase",
+              letterSpacing: ".12em",
+              color: C.muted,
+              marginBottom: 14,
+            }}
+          >
+            {label}
+          </div>
 
+          <div
+            style={{
+              fontFamily: C.serif,
+              fontSize: 32,
+              fontWeight: 800,
+              color: accent,
+              lineHeight: 1,
+            }}
+          >
+            {value}
+          </div>
+        </div>
+
+        <div
+          style={{
+            fontSize: 24,
+            opacity: 0.9,
+          }}
+        >
+          {icon}
+        </div>
+      </div>
+    </Card>
+  );
+}
 function SectionHeader({ title, subtitle, action }) {
   return (
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:20 }}>
