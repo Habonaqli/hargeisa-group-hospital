@@ -1946,20 +1946,20 @@ function UserApprovalsPage() {
 //  NAV CONFIG + RBAC
 // ═══════════════════════════════════════════════════════════════════════════════
 const ALL_NAV = [
-  { id:"dashboard",     label:"Dashboard",       icon:"⬡", roles:["admin","doctor","receptionist","nurse"] },
-  { id:"emergency",     label:"Emergency",        icon:"🚨", roles:["admin","doctor","nurse"] },
-  { id:"patients",      label:"Patients",         icon:"👥", roles:["admin","doctor","receptionist","nurse"] },
-  { id:"appointments",  label:"Appointments",     icon:"📅", roles:["admin","doctor","receptionist"] },
-  { id:"inpatients",    label:"Inpatients",       icon:"🏥", roles:["admin","doctor","nurse"] },
+  { id:"dashboard",     label:"Dashboard",       icon:"⬡", roles:["admin","doctor","receptionist","nurse","staff"] },
+  { id:"emergency",     label:"Emergency",        icon:"🚨", roles:["admin","doctor","nurse","staff"] },
+  { id:"patients",      label:"Patients",         icon:"👥", roles:["admin","doctor","receptionist","nurse","staff"] },
+  { id:"appointments",  label:"Appointments",     icon:"📅", roles:["admin","doctor","receptionist","staff"] },
+  { id:"inpatients",    label:"Inpatients",       icon:"🏥", roles:["admin","doctor","nurse","staff"] },
   { id:"prescriptions", label:"Prescriptions",    icon:"💊", roles:["admin","doctor"] },
-  { id:"laboratory",    label:"Laboratory",       icon:"🔬", roles:["admin","doctor","nurse"] },
-  { id:"pharmacy",      label:"Pharmacy",         icon:"💉", roles:["admin","receptionist","nurse"] },
+  { id:"laboratory",    label:"Laboratory",       icon:"🔬", roles:["admin","doctor","nurse","staff"] },
+  { id:"pharmacy",      label:"Pharmacy",         icon:"💉", roles:["admin","receptionist","nurse","staff"] },
   { id:"staff",         label:"Staff",            icon:"👔", roles:["admin"] },
   { id:"approvals",     label:"User Approvals",   icon:"✅", roles:["admin"] },
   { id:"doctors",       label:"Doctors",          icon:"🩺", roles:["admin","receptionist"] },
   { id:"billing",       label:"Billing",          icon:"💳", roles:["admin","receptionist"] },
   { id:"reports",       label:"Reports",          icon:"📊", roles:["admin"] },
-  { id:"notifications", label:"Notifications",    icon:"🔔", roles:["admin","doctor","receptionist","nurse"] },
+  { id:"notifications", label:"Notifications",    icon:"🔔", roles:["admin","doctor","receptionist","nurse","staff"] },
   { id:"settings",      label:"Settings",         icon:"⚙️", roles:["admin"] },
 ];
 
@@ -1971,6 +1971,197 @@ const PAGE_TITLES = {
   notifications:"Notification Center", settings:"Settings", approvals:"User Approvals", patient_profile:"Patient Profile",
 };
 
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PUBLIC LOGIN PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+function PublicLoginPage({ onLogin, onShowRegister }) {
+  const [form, setForm] = useState({ email: "", password: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const update = (key, value) => {
+    setForm((f) => ({ ...f, [key]: value }));
+  };
+
+  const submitLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Login failed");
+      }
+
+      if (!data.user) {
+        throw new Error("Login succeeded but user information was missing");
+      }
+
+      onLogin(data.user);
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: `radial-gradient(circle at top, rgba(245,158,11,0.10), transparent 34%), ${C.bg}`,
+      color: C.text,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+      fontFamily: C.sans,
+    }}>
+      <Card style={{
+        width: "100%",
+        maxWidth: 500,
+        padding: 32,
+        boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+      }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{
+            width: 58,
+            height: 58,
+            borderRadius: 16,
+            background: `linear-gradient(135deg, ${C.amber}, ${C.amberD})`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            margin: "0 auto 14px",
+            color: "#0F172A",
+            fontSize: 26,
+            fontWeight: 800,
+          }}>
+            H
+          </div>
+
+          <h1 style={{
+            fontFamily: C.serif,
+            fontSize: 30,
+            margin: 0,
+            color: C.text,
+          }}>
+            Hargeisa Group Hospital
+          </h1>
+
+          <p style={{
+            margin: "8px 0 0",
+            color: C.muted,
+            fontFamily: C.mono,
+            fontSize: 12,
+          }}>
+            Authorized Staff Login
+          </p>
+        </div>
+
+        <form onSubmit={submitLogin}>
+          <FormField label="Email">
+            <TextInput
+              value={form.email}
+              onChange={(v) => update("email", v)}
+              placeholder="name@example.com"
+            />
+          </FormField>
+
+          <FormField label="Password">
+            <input
+              type="password"
+              value={form.password}
+              onChange={(e) => update("password", e.target.value)}
+              placeholder="Enter your password"
+              style={{
+                width: "100%",
+                background: "rgba(255,255,255,0.06)",
+                border: `1px solid ${C.border}`,
+                borderRadius: 10,
+                padding: "10px 14px",
+                color: C.text,
+                fontFamily: C.mono,
+                fontSize: 12,
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </FormField>
+
+          {error && (
+            <div style={{
+              background: "rgba(248,113,113,0.12)",
+              border: "1px solid rgba(248,113,113,0.35)",
+              color: C.red,
+              padding: "10px 14px",
+              borderRadius: 10,
+              fontFamily: C.mono,
+              fontSize: 12,
+              marginBottom: 14,
+            }}>
+              ❌ {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: "100%",
+              background: loading ? C.faint : C.amber,
+              border: "none",
+              borderRadius: 12,
+              padding: "12px 18px",
+              color: "#0F172A",
+              fontFamily: C.mono,
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: loading ? "not-allowed" : "pointer",
+              letterSpacing: ".04em",
+            }}
+          >
+            {loading ? "LOGGING IN..." : "LOGIN"}
+          </button>
+        </form>
+
+        <div style={{
+          marginTop: 20,
+          textAlign: "center",
+          color: C.muted,
+          fontFamily: C.mono,
+          fontSize: 11,
+          lineHeight: 1.7,
+        }}>
+          Not registered yet?{" "}
+          <button
+            onClick={onShowRegister}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: C.amber,
+              fontFamily: C.mono,
+              fontSize: 11,
+              cursor: "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            Request account access
+          </button>
+        </div>
+      </Card>
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PUBLIC REGISTER PAGE
@@ -2195,21 +2386,76 @@ function PublicRegisterPage() {
 //  APP SHELL
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [roleKey, setRoleKey] = useState("admin");
-  const user = CURRENT_USER_OPTIONS[roleKey];
+  const getInitials = (name = "User") =>
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "U";
+
+  const normalizeSessionUser = (rawUser) => {
+    if (!rawUser) return null;
+    const name = rawUser.fullName || rawUser.name || "Hospital User";
+    return {
+      ...rawUser,
+      name,
+      fullName: name,
+      role: rawUser.role || "staff",
+      avatar: rawUser.avatar || getInitials(name),
+      dept: rawUser.dept || "Hospital Staff",
+    };
+  };
+
+  const [authUser, setAuthUser] = useState(() => {
+    try {
+      return normalizeSessionUser(JSON.parse(localStorage.getItem("hgh_auth_user") || "null"));
+    } catch {
+      return null;
+    }
+  });
 
   const [page, setPage] = useState("dashboard");
   const [collapsed, setSidebarCollapsed] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [notifications, setNotifications] = useState(NOTIFICATIONS_DATA);
 
-  const isPublicRegister =
-    window.location.pathname === "/register" ||
-    new URLSearchParams(window.location.search).get("register") === "1";
+  const query = new URLSearchParams(window.location.search);
+  const isPublicRegister = window.location.pathname === "/register" || query.get("register") === "1";
+  const isPublicLogin = window.location.pathname === "/login" || query.get("login") === "1";
+
+  const handleLogin = (loggedInUser) => {
+    const sessionUser = normalizeSessionUser(loggedInUser);
+    localStorage.setItem("hgh_auth_user", JSON.stringify(sessionUser));
+    setAuthUser(sessionUser);
+    setPage("dashboard");
+    window.history.replaceState({}, "", window.location.pathname === "/login" ? "/" : window.location.pathname);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("hgh_auth_user");
+    setAuthUser(null);
+    setPage("dashboard");
+    window.history.replaceState({}, "", "/");
+  };
 
   if (isPublicRegister) {
     return <PublicRegisterPage />;
   }
+
+  if (!authUser || isPublicLogin) {
+    return (
+      <PublicLoginPage
+        onLogin={handleLogin}
+        onShowRegister={() => {
+          window.history.pushState({}, "", "/?register=1");
+          window.location.reload();
+        }}
+      />
+    );
+  }
+
+  const user = authUser;
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -2264,15 +2510,20 @@ export default function App() {
             {!collapsed && <div><div style={{ fontFamily:C.serif, fontSize:14, color:C.text, lineHeight:1.1 }}>HargeisaHospital</div><div style={{ fontFamily:C.mono, fontSize:8, color:C.muted, letterSpacing:".1em", textTransform:"uppercase" }}>HMS · v3.0</div></div>}
           </div>
 
-          {/* Role switcher */}
+          {/* Signed-in user */}
           {!collapsed && (
             <div style={{ padding:"10px 14px", marginBottom:2 }}>
-              <select value={roleKey} onChange={e => { setRoleKey(e.target.value); setPage("dashboard"); }}
-                style={{ width:"100%", background:"rgba(245,158,11,0.08)", border:`1px solid rgba(245,158,11,0.2)`, borderRadius:8, padding:"6px 10px", color:C.amber, fontFamily:C.mono, fontSize:10, outline:"none", cursor:"pointer", letterSpacing:".04em" }}>
-                {Object.entries(CURRENT_USER_OPTIONS).map(([k,v]) => (
-                  <option key={k} value={k}>{v.role.charAt(0).toUpperCase()+v.role.slice(1)}: {v.name}</option>
-                ))}
-              </select>
+              <div style={{ background:"rgba(245,158,11,0.08)", border:`1px solid rgba(245,158,11,0.2)`, borderRadius:8, padding:"8px 10px" }}>
+                <div style={{ color:C.amber, fontFamily:C.mono, fontSize:10, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {user.name}
+                </div>
+                <div style={{ color:C.muted, fontFamily:C.mono, fontSize:9, marginTop:3, textTransform:"capitalize" }}>
+                  {user.role} · {user.status || "Active"}
+                </div>
+                <button onClick={handleLogout} style={{ marginTop:8, width:"100%", background:"rgba(248,113,113,0.10)", border:"1px solid rgba(248,113,113,0.25)", borderRadius:7, color:C.red, fontFamily:C.mono, fontSize:10, fontWeight:700, cursor:"pointer", padding:"6px 8px" }}>
+                  Logout
+                </button>
+              </div>
             </div>
           )}
 
