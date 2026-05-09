@@ -1736,6 +1736,226 @@ const PAGE_TITLES = {
   notifications:"Notification Center", settings:"Settings", patient_profile:"Patient Profile",
 };
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PUBLIC REGISTER PAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+function PublicRegisterPage() {
+  const [form, setForm] = useState({
+    fullName: "",
+    phone: "",
+    email: "",
+    password: "",
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const update = (key, value) => {
+    setForm((f) => ({ ...f, [key]: value }));
+  };
+
+  const submitRegister = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch("/api/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(form),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Registration failed");
+      }
+
+      setMessage(data.message || "Registration successful. Waiting for admin approval.");
+      setForm({
+        fullName: "",
+        phone: "",
+        email: "",
+        password: "",
+      });
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: C.bg,
+      color: C.text,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+      fontFamily: C.sans,
+    }}>
+      <Card style={{
+        width: "100%",
+        maxWidth: 520,
+        padding: 32,
+        boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+      }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{
+            width: 58,
+            height: 58,
+            borderRadius: 16,
+            background: `linear-gradient(135deg, ${C.amber}, ${C.amberD})`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            margin: "0 auto 14px",
+            color: "#0F172A",
+            fontSize: 26,
+            fontWeight: 800,
+          }}>
+            H
+          </div>
+
+          <h1 style={{
+            fontFamily: C.serif,
+            fontSize: 28,
+            margin: 0,
+            color: C.text,
+          }}>
+            Hargeisa Group Hospital
+          </h1>
+
+          <p style={{
+            margin: "8px 0 0",
+            color: C.muted,
+            fontFamily: C.mono,
+            fontSize: 12,
+          }}>
+            Staff Registration Request
+          </p>
+        </div>
+
+        <form onSubmit={submitRegister}>
+          <FormField label="Full Name">
+            <TextInput
+              value={form.fullName}
+              onChange={(v) => update("fullName", v)}
+              placeholder="Enter your full name"
+            />
+          </FormField>
+
+          <FormField label="Phone">
+            <TextInput
+              value={form.phone}
+              onChange={(v) => update("phone", v)}
+              placeholder="0634000000"
+            />
+          </FormField>
+
+          <FormField label="Email">
+            <TextInput
+              value={form.email}
+              onChange={(v) => update("email", v)}
+              placeholder="name@example.com"
+            />
+          </FormField>
+
+          <FormField label="Password">
+            <input
+              type="password"
+              value={form.password}
+              onChange={(e) => update("password", e.target.value)}
+              placeholder="Minimum 6 characters"
+              style={{
+                width: "100%",
+                background: "rgba(255,255,255,0.06)",
+                border: `1px solid ${C.border}`,
+                borderRadius: 10,
+                padding: "10px 14px",
+                color: C.text,
+                fontFamily: C.mono,
+                fontSize: 12,
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          </FormField>
+
+          {message && (
+            <div style={{
+              background: "rgba(52,211,153,0.12)",
+              border: "1px solid rgba(52,211,153,0.35)",
+              color: C.green,
+              padding: "10px 14px",
+              borderRadius: 10,
+              fontFamily: C.mono,
+              fontSize: 12,
+              marginBottom: 14,
+            }}>
+              ✅ {message}
+            </div>
+          )}
+
+          {error && (
+            <div style={{
+              background: "rgba(248,113,113,0.12)",
+              border: "1px solid rgba(248,113,113,0.35)",
+              color: C.red,
+              padding: "10px 14px",
+              borderRadius: 10,
+              fontFamily: C.mono,
+              fontSize: 12,
+              marginBottom: 14,
+            }}>
+              ❌ {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: "100%",
+              background: loading ? C.faint : C.amber,
+              border: "none",
+              borderRadius: 12,
+              padding: "12px 18px",
+              color: "#0F172A",
+              fontFamily: C.mono,
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: loading ? "not-allowed" : "pointer",
+              letterSpacing: ".04em",
+            }}
+          >
+            {loading ? "REGISTERING..." : "REGISTER"}
+          </button>
+        </form>
+
+        <div style={{
+          marginTop: 20,
+          textAlign: "center",
+          color: C.muted,
+          fontFamily: C.mono,
+          fontSize: 11,
+          lineHeight: 1.6,
+        }}>
+          Your account will be reviewed by the hospital admin before access is approved.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  APP SHELL
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1747,6 +1967,14 @@ export default function App() {
   const [collapsed, setSidebarCollapsed] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [notifications, setNotifications] = useState(NOTIFICATIONS_DATA);
+
+  const isPublicRegister =
+    window.location.pathname === "/register" ||
+    new URLSearchParams(window.location.search).get("register") === "1";
+
+  if (isPublicRegister) {
+    return <PublicRegisterPage />;
+  }
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
