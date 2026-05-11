@@ -1815,101 +1815,458 @@ function PharmacyPage() {
 //  LABORATORY
 // ═══════════════════════════════════════════════════════════════════════════════
 function LaboratoryPage() {
+  const emptyForm = {
+    id: "",
+    patientId: "",
+    doctorId: "",
+    appointmentId: "",
+    testName: "",
+    testCategory: "General",
+    sampleType: "Blood",
+    priority: "Normal",
+    urgent: false,
+    status: "Pending",
+    result: "",
+    resultSummary: "",
+    referenceRange: "",
+    resultStatus: "",
+    notes: "",
+  };
+
+  const [labs, setLabs] = useState([]);
+  const [patients, setPatients] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+  const [appointments, setAppointments] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
   const [showModal, setShowModal] = useState(false);
   const [reportModal, setReportModal] = useState(null);
+  const [form, setForm] = useState(emptyForm);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
-  const filtered = LAB_DATA.filter(l =>
-    (statusFilter === "all" || l.status === statusFilter) &&
-    Object.values(l).some(v => String(v).toLowerCase().includes(search.toLowerCase()))
-  );
+  const inputStyle = {
+    width: "100%",
+    background: "rgba(255,255,255,0.06)",
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+    color: C.text,
+    fontFamily: C.mono,
+    fontSize: 12,
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const normalizePatient = (patient, index = 0) => ({
+    ...patient,
+    id: patient._id || patient.id || `PT-${index + 1}`,
+    name: patient.name || patient.fullName || "Unnamed Patient",
+  });
+
+  const normalizeDoctor = (doctor, index = 0) => ({
+    ...doctor,
+    id: doctor._id || doctor.id || `DR-${index + 1}`,
+    name: doctor.fullName || doctor.name || doctor.email || "Unnamed Doctor",
+    department: doctor.department || doctor.dept || "General",
+  });
+
+  const normalizeAppointment = (appointment, index = 0) => ({
+    ...appointment,
+    id: appointment._id || appointment.id || `APT-${index + 1}`,
+    patientName: appointment.patientName || appointment.patient || "",
+    doctorName: appointment.doctorName || appointment.doctor || "",
+    appointmentDate: appointment.appointmentDate || appointment.date || "",
+    appointmentTime: appointment.appointmentTime || appointment.time || "",
+  });
+
+  const normalizeLab = (lab, index = 0) => ({
+    ...lab,
+    id: lab._id || lab.id || `LAB-${index + 1}`,
+    labNo: lab.labNo || lab.id || `LAB-${index + 1}`,
+    patientName: lab.patientName || lab.patient || "",
+    doctorName: lab.doctorName || lab.doctor || "",
+    testName: lab.testName || lab.test || "",
+    testCategory: lab.testCategory || "General",
+    sampleType: lab.sampleType || lab.sample || "",
+    priority: lab.priority || (lab.urgent ? "Urgent" : "Normal"),
+    urgent: Boolean(lab.urgent),
+    status: lab.status || "Pending",
+    result: lab.result || "",
+    resultSummary: lab.resultSummary || "",
+    referenceRange: lab.referenceRange || "",
+    resultStatus: lab.resultStatus || lab.result || "",
+    requestedAt: lab.requestedAt || lab.createdAt || "",
+    createdAt: lab.createdAt || "",
+  });
+
+  const loadLaboratory = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [labRes, patientRes, doctorRes, appointmentRes] = await Promise.all([
+        fetch("/api/laboratory"),
+        fetch("/api/patients"),
+        fetch("/api/doctors"),
+        fetch("/api/appointments"),
+      ]);
+
+      const [labText, patientText, doctorText, appointmentText] = await Promise.all([
+        labRes.text(),
+        patientRes.text(),
+        doctorRes.text(),
+        appointmentRes.text(),
+      ]);
+
+      const labData = labText ? JSON.parse(labText) : [];
+      const patientData = patientText ? JSON.parse(patientText) : [];
+      const doctorData = doctorText ? JSON.parse(doctorText) : [];
+      const appointmentData = appointmentText ? JSON.parse(appointmentText) : [];
+
+      if (!labRes.ok) throw new Error(labData.message || "Failed to load laboratory records");
+      if (!patientRes.ok) throw new Error(patientData.message || "Failed to load patients");
+      if (!doctorRes.ok) throw new Error(doctorData.message || "Failed to load doctors");
+      if (!appointmentRes.ok) throw new Error(appointmentData.message || "Failed to load appointments");
+
+      setLabs(Array.isArray(labData) ? labData.map(normalizeLab) : []);
+      setPatients(Array.isArray(patientData) ? patientData.map(normalizePatient) : []);
+      setDoctors(Array.isArray(doctorData) ? doctorData.map(normalizeDoctor) : []);
+      setAppointments(Array.isArray(appointmentData) ? appointmentData.map(normalizeAppointment) : []);
+    } catch (err) {
+      setError(err.message || "Unable to load laboratory records");
+      setLabs([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLaboratory();
+  }, [loadLaboratory]);
+
+  const updateForm = (key, value) => {
+    setForm((f) => ({ ...f, [key]: value }));
+  };
+
+  const resetForm = () => {
+    setForm(emptyForm);
+    setShowModal(false);
+  };
+
+  const openNewLab = () => {
+    setMessage("");
+    setError("");
+    setForm(emptyForm);
+    setShowModal(true);
+  };
+
+  const editLab = (lab) => {
+    setMessage("");
+    setError("");
+    setForm({
+      id: lab.id,
+      patientId: lab.patientId || "",
+      doctorId: lab.doctorId || "",
+      appointmentId: lab.appointmentId || "",
+      testName: lab.testName || "",
+      testCategory: lab.testCategory || "General",
+      sampleType: lab.sampleType || "Blood",
+      priority: lab.priority || "Normal",
+      urgent: Boolean(lab.urgent),
+      status: lab.status || "Pending",
+      result: lab.result || "",
+      resultSummary: lab.resultSummary || "",
+      referenceRange: lab.referenceRange || "",
+      resultStatus: lab.resultStatus || "",
+      notes: lab.notes || "",
+    });
+    setShowModal(true);
+  };
+
+  const saveLab = async () => {
+    if (!form.patientId) {
+      setError("Patient is required");
+      return;
+    }
+    if (!form.doctorId) {
+      setError("Doctor is required");
+      return;
+    }
+    if (!form.testName.trim()) {
+      setError("Test name is required");
+      return;
+    }
+    if (!form.sampleType.trim()) {
+      setError("Sample type is required");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const isEditing = Boolean(form.id);
+      const payload = {
+        ...form,
+        urgent: Boolean(form.urgent) || form.priority === "Urgent" || form.priority === "STAT",
+      };
+
+      const response = await fetch("/api/laboratory", {
+        method: isEditing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Lab save failed");
+
+      setMessage(isEditing ? "Lab record updated successfully" : "Lab request created successfully");
+      resetForm();
+      await loadLaboratory();
+    } catch (err) {
+      setError(err.message || "Unable to save lab record");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateLabStatus = async (lab, status) => {
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/laboratory", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: lab.id, status }),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Status update failed");
+      setMessage(`Lab status updated to ${status}`);
+      await loadLaboratory();
+    } catch (err) {
+      setError(err.message || "Unable to update lab status");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteLab = async (lab) => {
+    if (!window.confirm(`Delete lab record ${lab.labNo}?`)) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/laboratory", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: lab.id }),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Lab delete failed");
+      setMessage("Lab record deleted successfully");
+      await loadLaboratory();
+    } catch (err) {
+      setError(err.message || "Unable to delete lab record");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filtered = labs.filter((lab) => {
+    const q = search.toLowerCase();
+    const byStatus = statusFilter === "all" || lab.status === statusFilter;
+    const byPriority = priorityFilter === "all" || lab.priority === priorityFilter || (priorityFilter === "urgent" && lab.urgent);
+    const bySearch = [lab.labNo, lab.patientName, lab.doctorName, lab.testName, lab.testCategory, lab.sampleType, lab.result, lab.resultSummary, lab.status, lab.notes]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+    return byStatus && byPriority && bySearch;
+  });
+
+  const pendingCount = labs.filter((l) => l.status === "Pending").length;
+  const inProgressCount = labs.filter((l) => l.status === "In Progress").length;
+  const completedCount = labs.filter((l) => l.status === "Completed").length;
+  const urgentCount = labs.filter((l) => l.urgent).length;
+
+  const appointmentOptions = appointments.map((a) => ({
+    value: a.id,
+    label: `${a.patientName || "Patient"} · ${a.doctorName || "Doctor"} · ${a.appointmentDate || "No date"} ${a.appointmentTime || ""}`,
+  }));
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
-      <SectionHeader title="Laboratory" subtitle={`${filtered.length} test requests`}
-        action={<div style={{ display:"flex", gap:10 }}><GhostBtn onClick={() => exportCSV(filtered,"lab-tests")}>⬇ Export</GhostBtn><AmberBtn onClick={() => setShowModal(true)}>+ Request Test</AmberBtn></div>} />
+      <SectionHeader
+        title="Laboratory"
+        subtitle={`${filtered.length} real lab records from MongoDB`}
+        action={
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <GhostBtn onClick={loadLaboratory}>Refresh Lab</GhostBtn>
+            <GhostBtn onClick={() => exportCSV(filtered,"laboratory-records")}>⬇ Export CSV</GhostBtn>
+            <AmberBtn onClick={openNewLab}>+ Request Test</AmberBtn>
+          </div>
+        }
+      />
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
-        {[
-          {label:"Total Tests",  val:LAB_DATA.length,                                   color:C.blue },
-          {label:"Pending",      val:LAB_DATA.filter(l=>l.status==="pending").length,    color:C.amber},
-          {label:"In Progress",  val:LAB_DATA.filter(l=>l.status==="in-progress").length,color:"#FBBF24"},
-          {label:"Completed",    val:LAB_DATA.filter(l=>l.status==="completed").length,  color:C.green},
-        ].map(s => (
-          <Card key={s.label} style={{ padding:"16px 20px" }}>
-            <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>{s.label}</div>
-            <div style={{ fontFamily:C.serif, fontSize:26, color:s.color, fontWeight:700 }}>{s.val}</div>
-          </Card>
-        ))}
+        <StatCard label="Pending" value={pendingCount} icon="⏳" accent={C.amber} />
+        <StatCard label="In Progress" value={inProgressCount} icon="🧪" accent={C.blue} />
+        <StatCard label="Completed" value={completedCount} icon="✅" accent={C.green} />
+        <StatCard label="Urgent" value={urgentCount} icon="🚨" accent={C.red} />
       </div>
 
-      <div style={{ display:"flex", gap:10 }}>
-        <SearchBar value={search} onChange={setSearch} placeholder="Search tests..." />
-        <Select value={statusFilter} onChange={setStatusFilter} options={[{value:"all",label:"All Status"},{value:"pending",label:"Pending"},{value:"in-progress",label:"In Progress"},{value:"completed",label:"Completed"}]} />
+      {(message || error) && (
+        <div style={{
+          border: `1px solid ${error ? "rgba(248,113,113,.35)" : "rgba(52,211,153,.35)"}`,
+          background: error ? "rgba(248,113,113,.12)" : "rgba(52,211,153,.12)",
+          color: error ? C.red : C.green,
+          padding: "12px 14px",
+          borderRadius: 12,
+          fontFamily: C.mono,
+          fontSize: 12,
+        }}>
+          {error ? "❌" : "✅"} {error || message}
+        </div>
+      )}
+
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+        <SearchBar value={search} onChange={setSearch} placeholder="Search real lab records..." width={260} />
+        <Select value={statusFilter} onChange={setStatusFilter} options={[
+          {value:"all",label:"All Status"},
+          {value:"Pending",label:"Pending"},
+          {value:"In Progress",label:"In Progress"},
+          {value:"Completed",label:"Completed"},
+          {value:"Cancelled",label:"Cancelled"},
+        ]} />
+        <Select value={priorityFilter} onChange={setPriorityFilter} options={[
+          {value:"all",label:"All Priority"},
+          {value:"Normal",label:"Normal"},
+          {value:"Urgent",label:"Urgent"},
+          {value:"STAT",label:"STAT"},
+          {value:"urgent",label:"Urgent Only"},
+        ]} />
       </div>
 
       <Card>
-        <DataTable
-          columns={["Lab ID","Patient","Test","Doctor","Sample","Date","Urgent","Status","Result","Action"]}
-          rows={filtered}
-          renderRow={(l,i) => (
-            <tr key={l.id}>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{l.id}</td>
-              <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{l.patient}</td>
-              <td style={{...td(i), fontSize:12, color:C.text}}>{l.test}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{l.doctor}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{l.sample}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.muted}}>{l.date}</td>
-              <td style={{...td(i), textAlign:"center"}}>
-                {l.urgent && <span style={{ fontSize:10, color:C.red, fontFamily:C.mono, background:"rgba(248,113,113,0.1)", padding:"2px 8px", borderRadius:4, fontWeight:700 }}>URGENT</span>}
-              </td>
-              <td style={td(i)}><Badge status={l.status} /></td>
-              <td style={td(i)}><Badge status={l.result} /></td>
-              <td style={td(i)}>{l.status === "completed" && <GhostBtn onClick={() => setReportModal(l)} color={C.teal}>Report</GhostBtn>}</td>
-            </tr>
-          )} />
+        {loading ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>Loading real laboratory records...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>No lab records found. Click + Request Test to add one.</div>
+        ) : (
+          <DataTable
+            columns={["Lab No","Patient","Test","Doctor","Sample","Priority","Status","Result","Action"]}
+            rows={filtered}
+            renderRow={(l,i) => (
+              <tr key={l.id}>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{l.labNo}</td>
+                <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{l.patientName || "N/A"}</td>
+                <td style={{...td(i), fontSize:12, color:C.text}}>
+                  <div>{l.testName}</div>
+                  <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted }}>{l.testCategory}</div>
+                </td>
+                <td style={{...td(i), fontSize:12, color:C.muted}}>{l.doctorName || "N/A"}</td>
+                <td style={{...td(i), fontSize:12, color:C.muted}}>{l.sampleType || "N/A"}</td>
+                <td style={td(i)}>
+                  {l.urgent ? <span style={{ fontSize:10, color:C.red, fontFamily:C.mono, background:"rgba(248,113,113,0.1)", padding:"2px 8px", borderRadius:4, fontWeight:700 }}>URGENT</span> : <span style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>{l.priority}</span>}
+                </td>
+                <td style={td(i)}><Badge status={l.status} /></td>
+                <td style={{...td(i), fontSize:12, color:C.muted}}>{l.resultStatus || l.result || "Pending"}</td>
+                <td style={td(i)}>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    <GhostBtn onClick={() => setReportModal(l)} color={C.teal}>Report</GhostBtn>
+                    {l.status !== "In Progress" && l.status !== "Completed" && <GhostBtn onClick={() => updateLabStatus(l, "In Progress")} color={C.blue}>Start</GhostBtn>}
+                    {l.status !== "Completed" && <GhostBtn onClick={() => updateLabStatus(l, "Completed")} color={C.green}>Complete</GhostBtn>}
+                    <GhostBtn onClick={() => editLab(l)} color={C.amber}>Edit</GhostBtn>
+                    <GhostBtn onClick={() => deleteLab(l)} color={C.red}>Delete</GhostBtn>
+                  </div>
+                </td>
+              </tr>
+            )}
+          />
+        )}
       </Card>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Request Lab Test">
+      <Modal open={showModal} onClose={resetForm} title={form.id ? "Edit Lab Record" : "Request Lab Test"} width={760}>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-          <FormField label="Patient"><Select value="" onChange={() => {}} options={[{value:"",label:"Select patient"},...PATIENTS_DATA.map(p => ({value:p.id,label:p.name}))]} style={{width:"100%"}} /></FormField>
-          <FormField label="Requested By"><Select value="" onChange={() => {}} options={[{value:"",label:"Select doctor"},...DOCTORS_DATA.map(d => ({value:d.id,label:d.name}))]} style={{width:"100%"}} /></FormField>
-          <FormField label="Test Name"><TextInput value="" onChange={() => {}} placeholder="e.g. Complete Blood Count" /></FormField>
-          <FormField label="Sample Type"><TextInput value="" onChange={() => {}} placeholder="e.g. Blood, Urine" /></FormField>
-          <FormField label="Priority">
-            <Select value="" onChange={() => {}} options={[{value:"normal",label:"Normal"},{value:"urgent",label:"Urgent"}]} style={{width:"100%"}} />
+          <FormField label="Patient">
+            <Select
+              value={form.patientId}
+              onChange={(v) => updateForm("patientId", v)}
+              options={[{value:"",label:"Select patient"}, ...patients.map((p) => ({ value:p.id, label:p.name }))]}
+              style={{width:"100%"}}
+            />
           </FormField>
-          <FormField label="Notes"><TextInput value="" onChange={() => {}} placeholder="Additional notes" /></FormField>
+          <FormField label="Requested By / Doctor">
+            <Select
+              value={form.doctorId}
+              onChange={(v) => updateForm("doctorId", v)}
+              options={[{value:"",label:"Select doctor"}, ...doctors.map((d) => ({ value:d.id, label:d.name }))]}
+              style={{width:"100%"}}
+            />
+          </FormField>
+          <FormField label="Related Appointment Optional">
+            <Select
+              value={form.appointmentId}
+              onChange={(v) => updateForm("appointmentId", v)}
+              options={[{value:"",label:"No appointment selected"}, ...appointmentOptions]}
+              style={{width:"100%"}}
+            />
+          </FormField>
+          <FormField label="Test Name"><TextInput value={form.testName} onChange={(v) => updateForm("testName", v)} placeholder="Complete Blood Count" /></FormField>
+          <FormField label="Test Category"><TextInput value={form.testCategory} onChange={(v) => updateForm("testCategory", v)} placeholder="Hematology" /></FormField>
+          <FormField label="Sample Type"><TextInput value={form.sampleType} onChange={(v) => updateForm("sampleType", v)} placeholder="Blood, Urine, Swab" /></FormField>
+          <FormField label="Priority">
+            <Select value={form.priority} onChange={(v) => updateForm("priority", v)} options={[{value:"Normal",label:"Normal"},{value:"Urgent",label:"Urgent"},{value:"STAT",label:"STAT"}]} style={{width:"100%"}} />
+          </FormField>
+          <FormField label="Status">
+            <Select value={form.status} onChange={(v) => updateForm("status", v)} options={[{value:"Pending",label:"Pending"},{value:"In Progress",label:"In Progress"},{value:"Completed",label:"Completed"},{value:"Cancelled",label:"Cancelled"}]} style={{width:"100%"}} />
+          </FormField>
+          <FormField label="Result"><TextInput value={form.result} onChange={(v) => updateForm("result", v)} placeholder="Result value/details" /></FormField>
+          <FormField label="Result Summary"><TextInput value={form.resultSummary} onChange={(v) => updateForm("resultSummary", v)} placeholder="Normal / Abnormal / Positive / Negative" /></FormField>
+          <FormField label="Reference Range"><TextInput value={form.referenceRange} onChange={(v) => updateForm("referenceRange", v)} placeholder="e.g. 4.5 - 11.0" /></FormField>
+          <FormField label="Result Status"><TextInput value={form.resultStatus} onChange={(v) => updateForm("resultStatus", v)} placeholder="Normal / Abnormal" /></FormField>
         </div>
+        <FormField label="Notes"><TextInput value={form.notes} onChange={(v) => updateForm("notes", v)} placeholder="Additional lab notes" /></FormField>
+        <label style={{ display:"flex", alignItems:"center", gap:8, color:C.text, fontFamily:C.mono, fontSize:12, marginBottom:16 }}>
+          <input type="checkbox" checked={form.urgent} onChange={(e) => updateForm("urgent", e.target.checked)} /> Mark as urgent
+        </label>
         <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <AmberBtn onClick={() => setShowModal(false)}>Submit Request</AmberBtn>
-          <GhostBtn onClick={() => setShowModal(false)}>Cancel</GhostBtn>
+          <AmberBtn onClick={saveLab}>{saving ? "Saving..." : form.id ? "Update Lab Record" : "Submit Request"}</AmberBtn>
+          <GhostBtn onClick={resetForm}>Cancel</GhostBtn>
         </div>
       </Modal>
 
-      {/* Lab Report Modal */}
-      <Modal open={!!reportModal} onClose={() => setReportModal(null)} title="Lab Report" width={500}>
+      <Modal open={!!reportModal} onClose={() => setReportModal(null)} title="Lab Report" width={560}>
         {reportModal && (
           <div>
             <div style={{ background:"rgba(255,255,255,0.03)", border:`1px solid ${C.border}`, borderRadius:12, padding:"18px 20px", marginBottom:16 }}>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                {[["Lab ID",reportModal.id],["Patient",reportModal.patient],["Test",reportModal.test],["Date",reportModal.date],["Sample",reportModal.sample],["Requested by",reportModal.doctor]].map(([l,v]) => (
-                  <div key={l}><div style={{ fontFamily:C.mono, fontSize:9, color:C.muted, textTransform:"uppercase", letterSpacing:".06em" }}>{l}</div><div style={{ fontSize:13, color:C.text, marginTop:2 }}>{v}</div></div>
+                {[["Lab No",reportModal.labNo],["Patient",reportModal.patientName],["Test",reportModal.testName],["Sample",reportModal.sampleType],["Requested by",reportModal.doctorName],["Status",reportModal.status]].map(([l,v]) => (
+                  <div key={l}><div style={{ fontFamily:C.mono, fontSize:9, color:C.muted, textTransform:"uppercase", letterSpacing:".06em" }}>{l}</div><div style={{ fontSize:13, color:C.text, marginTop:2 }}>{v || "N/A"}</div></div>
                 ))}
               </div>
             </div>
-            <div style={{ padding:"16px 20px", background:STATUS_MAP[reportModal.result]?.bg, borderRadius:12, border:`1px solid ${STATUS_MAP[reportModal.result]?.color}33` }}>
+            <div style={{ padding:"16px 20px", background:"rgba(255,255,255,0.04)", borderRadius:12, border:`1px solid ${C.border}` }}>
               <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>Result</div>
-              <div style={{ fontSize:22, fontFamily:C.serif, color:STATUS_MAP[reportModal.result]?.color, fontWeight:700 }}>{reportModal.result}</div>
+              <div style={{ fontSize:20, fontFamily:C.serif, color:C.text, fontWeight:700 }}>{reportModal.resultStatus || reportModal.resultSummary || "Pending"}</div>
+              <div style={{ marginTop:10, fontFamily:C.mono, fontSize:12, color:C.muted }}>{reportModal.result || "No detailed result entered yet."}</div>
+              {reportModal.referenceRange && <div style={{ marginTop:8, fontFamily:C.mono, fontSize:11, color:C.amber }}>Reference: {reportModal.referenceRange}</div>}
             </div>
             <div style={{ display:"flex", gap:10, marginTop:16 }}>
-              <AmberBtn onClick={() => setReportModal(null)}>Print Report</AmberBtn>
+              <AmberBtn onClick={() => window.print()}>Print Report</AmberBtn>
               <GhostBtn onClick={() => setReportModal(null)}>Close</GhostBtn>
             </div>
           </div>
         )}
       </Modal>
+
+      <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>
+        This page now reads and writes real laboratory records from MongoDB. Demo lab data is no longer displayed here.
+      </div>
     </div>
   );
 }
