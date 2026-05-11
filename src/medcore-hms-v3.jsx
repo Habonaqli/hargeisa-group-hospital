@@ -2043,29 +2043,321 @@ function PrescriptionsPage() {
 //  BILLING
 // ═══════════════════════════════════════════════════════════════════════════════
 function BillingPage() {
+  const emptyForm = {
+    id: "",
+    patientId: "",
+    appointmentId: "",
+    serviceName: "",
+    department: "",
+    description: "",
+    totalAmount: "",
+    paidAmount: "0",
+    paymentMethod: "cash",
+    status: "Unpaid",
+    notes: "",
+  };
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showModal, setShowModal] = useState(false);
+  const [invoices, setInvoices] = useState([]);
+  const [patients, setPatients] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [form, setForm] = useState(emptyForm);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
-  const total = BILLS_DATA.reduce((s,b) => s + b.total, 0);
-  const paid  = BILLS_DATA.filter(b => b.status === "paid").reduce((s,b) => s + b.total, 0);
+  const inputStyle = {
+    width: "100%",
+    background: "rgba(255,255,255,0.06)",
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+    color: C.text,
+    fontFamily: C.mono,
+    fontSize: 12,
+    outline: "none",
+    boxSizing: "border-box",
+  };
 
-  const filtered = BILLS_DATA.filter(b =>
-    (statusFilter === "all" || b.status === statusFilter) &&
-    Object.values(b).some(v => String(v).toLowerCase().includes(search.toLowerCase()))
-  );
+  const normalizeInvoice = (invoice) => ({
+    ...invoice,
+    id: invoice._id || invoice.id || "",
+    invoiceNo: invoice.invoiceNo || invoice.id || "",
+    patientId: invoice.patientId || "",
+    patientName: invoice.patientName || invoice.patient || "",
+    appointmentId: invoice.appointmentId || "",
+    appointmentLabel: invoice.appointmentId ? `${invoice.appointmentDate || ""} ${invoice.appointmentTime || ""}`.trim() : "—",
+    serviceName: invoice.serviceName || "",
+    department: invoice.department || "",
+    description: invoice.description || "",
+    totalAmount: Number(invoice.totalAmount ?? invoice.total ?? 0),
+    paidAmount: Number(invoice.paidAmount ?? 0),
+    balance: Number(invoice.balance ?? Math.max(Number(invoice.totalAmount || 0) - Number(invoice.paidAmount || 0), 0)),
+    paymentMethod: invoice.paymentMethod || invoice.method || "",
+    status: invoice.status || "Unpaid",
+    notes: invoice.notes || "",
+    createdAt: invoice.createdAt || "",
+  });
+
+  const normalizePatientOption = (patient) => ({
+    id: patient._id || patient.id || "",
+    name: patient.name || patient.fullName || "Unnamed Patient",
+  });
+
+  const normalizeAppointmentOption = (appointment) => ({
+    id: appointment._id || appointment.id || "",
+    label: `${appointment.patientName || appointment.patient || "Patient"} · ${appointment.doctorName || appointment.doctor || "Doctor"} · ${appointment.appointmentDate || appointment.date || ""} ${appointment.appointmentTime || appointment.time || ""}`.trim(),
+    patientId: appointment.patientId || "",
+    department: appointment.department || appointment.dept || "",
+  });
+
+  const badgeStatus = (status) => {
+    const value = String(status || "").toLowerCase();
+    if (value === "paid") return "paid";
+    if (value === "unpaid") return "unpaid";
+    if (value === "partial") return "partially paid";
+    if (value === "partially paid") return "partially paid";
+    if (value === "cancelled") return "cancelled";
+    return status || "Unpaid";
+  };
+
+  const loadBilling = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/billing");
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : [];
+      if (!response.ok) throw new Error(data.message || "Failed to load billing records");
+      setInvoices(Array.isArray(data) ? data.map(normalizeInvoice) : []);
+    } catch (err) {
+      setError(err.message || "Unable to load billing records");
+      setInvoices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadPatients = useCallback(async () => {
+    try {
+      const response = await fetch("/api/patients");
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : [];
+      setPatients(Array.isArray(data) ? data.map(normalizePatientOption) : []);
+    } catch (_) {
+      setPatients([]);
+    }
+  }, []);
+
+  const loadAppointments = useCallback(async () => {
+    try {
+      const response = await fetch("/api/appointments");
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : [];
+      setAppointments(Array.isArray(data) ? data.map(normalizeAppointmentOption) : []);
+    } catch (_) {
+      setAppointments([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadBilling();
+    loadPatients();
+    loadAppointments();
+  }, [loadBilling, loadPatients, loadAppointments]);
+
+  const updateForm = (key, value) => {
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      if (key === "appointmentId") {
+        const selectedAppointment = appointments.find((a) => a.id === value);
+        if (selectedAppointment) {
+          next.patientId = selectedAppointment.patientId || next.patientId;
+          next.department = selectedAppointment.department || next.department;
+        }
+      }
+      return next;
+    });
+  };
+
+  const openCreate = () => {
+    setForm(emptyForm);
+    setMessage("");
+    setError("");
+    setShowModal(true);
+  };
+
+  const openEdit = (invoice) => {
+    setForm({
+      id: invoice.id,
+      patientId: invoice.patientId || "",
+      appointmentId: invoice.appointmentId || "",
+      serviceName: invoice.serviceName || "",
+      department: invoice.department || "",
+      description: invoice.description || "",
+      totalAmount: String(invoice.totalAmount || 0),
+      paidAmount: String(invoice.paidAmount || 0),
+      paymentMethod: invoice.paymentMethod || "cash",
+      status: invoice.status || "Unpaid",
+      notes: invoice.notes || "",
+    });
+    setMessage("");
+    setError("");
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setForm(emptyForm);
+  };
+
+  const saveInvoice = async () => {
+    if (!form.patientId) {
+      setError("Patient is required");
+      return;
+    }
+    if (!form.serviceName.trim()) {
+      setError("Service name is required");
+      return;
+    }
+    if (form.totalAmount === "" || Number(form.totalAmount) < 0) {
+      setError("Valid total amount is required");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const isEditing = Boolean(form.id);
+      const payload = {
+        ...(isEditing ? { id: form.id } : {}),
+        patientId: form.patientId,
+        appointmentId: form.appointmentId || undefined,
+        serviceName: form.serviceName,
+        department: form.department,
+        description: form.description,
+        totalAmount: Number(form.totalAmount || 0),
+        paidAmount: Number(form.paidAmount || 0),
+        paymentMethod: form.paymentMethod,
+        status: form.status,
+        notes: form.notes,
+      };
+
+      const response = await fetch("/api/billing", {
+        method: isEditing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Invoice save failed");
+
+      setMessage(isEditing ? "Invoice updated successfully" : "Invoice created successfully");
+      closeModal();
+      await loadBilling();
+    } catch (err) {
+      setError(err.message || "Unable to save invoice");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteInvoice = async (invoice) => {
+    if (!window.confirm(`Delete invoice ${invoice.invoiceNo}?`)) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/billing", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: invoice.id }),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Invoice delete failed");
+      setMessage("Invoice deleted successfully");
+      await loadBilling();
+    } catch (err) {
+      setError(err.message || "Unable to delete invoice");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const markPaid = async (invoice) => {
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/billing", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: invoice.id,
+          patientId: invoice.patientId,
+          appointmentId: invoice.appointmentId || undefined,
+          serviceName: invoice.serviceName,
+          department: invoice.department,
+          description: invoice.description,
+          totalAmount: invoice.totalAmount,
+          paidAmount: invoice.totalAmount,
+          paymentMethod: invoice.paymentMethod || "cash",
+          status: "Paid",
+          notes: invoice.notes,
+        }),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Payment update failed");
+      setMessage("Invoice marked as paid");
+      await loadBilling();
+    } catch (err) {
+      setError(err.message || "Unable to mark invoice as paid");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filtered = invoices.filter((b) => {
+    const statusOk = statusFilter === "all" || String(b.status).toLowerCase() === statusFilter;
+    const q = search.toLowerCase();
+    const searchOk = [b.invoiceNo, b.patientName, b.serviceName, b.department, b.description, b.status, b.paymentMethod]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+    return statusOk && searchOk;
+  });
+
+  const total = invoices.reduce((s, b) => s + Number(b.totalAmount || 0), 0);
+  const paid = invoices.reduce((s, b) => s + Number(b.paidAmount || 0), 0);
+  const outstanding = invoices.reduce((s, b) => s + Number(b.balance || 0), 0);
+  const unpaidCount = invoices.filter((b) => ["unpaid", "partial", "partially paid"].includes(String(b.status).toLowerCase())).length;
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
-      <SectionHeader title="Billing & Invoices" subtitle={`${filtered.length} invoices`}
-        action={<div style={{ display:"flex", gap:10 }}><GhostBtn onClick={() => exportCSV(filtered,"invoices")}>⬇ Export</GhostBtn><AmberBtn onClick={() => setShowModal(true)}>+ New Invoice</AmberBtn></div>} />
+      <SectionHeader
+        title="Billing & Invoices"
+        subtitle={`${filtered.length} real invoices from MongoDB`}
+        action={
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <GhostBtn onClick={loadBilling}>Refresh Billing</GhostBtn>
+            <GhostBtn onClick={() => exportCSV(filtered, "billing-invoices")}>⬇ Export</GhostBtn>
+            <AmberBtn onClick={openCreate}>+ New Invoice</AmberBtn>
+          </div>
+        }
+      />
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
         {[
-          {label:"Total Billed",  val:`$${total}`,       color:C.blue },
-          {label:"Collected",     val:`$${paid}`,        color:C.green},
-          {label:"Outstanding",   val:`$${total-paid}`,  color:C.red  },
-          {label:"Invoices",      val:BILLS_DATA.length, color:C.amber},
+          {label:"Total Billed",  val:`$${total.toLocaleString()}`,       color:C.blue },
+          {label:"Collected",     val:`$${paid.toLocaleString()}`,        color:C.green},
+          {label:"Outstanding",   val:`$${outstanding.toLocaleString()}`, color:C.red  },
+          {label:"Open Invoices", val:unpaidCount,                       color:C.amber},
         ].map(s => (
           <Card key={s.label} style={{ padding:"16px 20px" }}>
             <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>{s.label}</div>
@@ -2074,41 +2366,117 @@ function BillingPage() {
         ))}
       </div>
 
-      <div style={{ display:"flex", gap:10 }}>
-        <SearchBar value={search} onChange={setSearch} placeholder="Search invoices..." />
-        <Select value={statusFilter} onChange={setStatusFilter} options={[{value:"all",label:"All Status"},{value:"paid",label:"Paid"},{value:"unpaid",label:"Unpaid"},{value:"partially paid",label:"Partial"},{value:"cancelled",label:"Cancelled"}]} />
+      {(message || error) && (
+        <div style={{
+          border: `1px solid ${error ? "rgba(248,113,113,.35)" : "rgba(52,211,153,.35)"}`,
+          background: error ? "rgba(248,113,113,.12)" : "rgba(52,211,153,.12)",
+          color: error ? C.red : C.green,
+          padding: "12px 14px",
+          borderRadius: 12,
+          fontFamily: C.mono,
+          fontSize: 12,
+        }}>
+          {error ? "❌" : "✅"} {error || message}
+        </div>
+      )}
+
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+        <SearchBar value={search} onChange={setSearch} placeholder="Search real invoices..." />
+        <Select value={statusFilter} onChange={setStatusFilter} options={[
+          {value:"all", label:"All Status"},
+          {value:"paid", label:"Paid"},
+          {value:"unpaid", label:"Unpaid"},
+          {value:"partial", label:"Partial"},
+          {value:"cancelled", label:"Cancelled"},
+        ]} />
       </div>
 
       <Card>
-        <DataTable
-          columns={["Invoice","Patient","Appointment","Total","Method","Status","Date","Action"]}
-          rows={filtered}
-          renderRow={(b,i) => (
-            <tr key={b.id}>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{b.id}</td>
-              <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{b.patient}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.muted}}>{b.apt}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.text, fontWeight:700}}>{b.total ? `$${b.total}` : "—"}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{b.method}</td>
-              <td style={td(i)}><Badge status={b.status} /></td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{b.date}</td>
-              <td style={td(i)}>{b.status === "unpaid" && <GhostBtn color={C.green}>Mark Paid</GhostBtn>}</td>
-            </tr>
-          )} />
+        {loading ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>Loading real billing records...</div>
+        ) : (
+          <DataTable
+            columns={["Invoice", "Patient", "Service", "Total", "Paid", "Balance", "Method", "Status", "Action"]}
+            rows={filtered}
+            renderRow={(b,i) => (
+              <tr key={b.id || b.invoiceNo}>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{b.invoiceNo}</td>
+                <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{b.patientName || "N/A"}</td>
+                <td style={{...td(i), color:C.muted, fontSize:12}}>
+                  <div style={{ color:C.text }}>{b.serviceName || "Service"}</div>
+                  <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted }}>{b.department || "General"}</div>
+                </td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.text, fontWeight:700}}>${Number(b.totalAmount || 0).toLocaleString()}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.green}}>${Number(b.paidAmount || 0).toLocaleString()}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:Number(b.balance || 0) > 0 ? C.red : C.green}}>${Number(b.balance || 0).toLocaleString()}</td>
+                <td style={{...td(i), fontSize:12, color:C.muted, textTransform:"capitalize"}}>{b.paymentMethod || "—"}</td>
+                <td style={td(i)}><Badge status={badgeStatus(b.status)} /></td>
+                <td style={td(i)}>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                    {String(b.status).toLowerCase() !== "paid" && <GhostBtn onClick={() => markPaid(b)} color={C.green}>Mark Paid</GhostBtn>}
+                    <GhostBtn onClick={() => openEdit(b)} color={C.blue}>Edit</GhostBtn>
+                    <GhostBtn onClick={() => deleteInvoice(b)} color={C.red}>Delete</GhostBtn>
+                  </div>
+                </td>
+              </tr>
+            )}
+          />
+        )}
       </Card>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Create Invoice">
+      <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>
+        This page now reads and writes real billing invoices from MongoDB. Demo billing data is no longer displayed here.
+      </div>
+
+      <Modal open={showModal} onClose={closeModal} title={form.id ? "Edit Invoice" : "Create Invoice"} width={720}>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-          <FormField label="Patient"><Select value="" onChange={() => {}} options={[{value:"",label:"Select patient"},...PATIENTS_DATA.map(p => ({value:p.id,label:p.name}))]} style={{width:"100%"}} /></FormField>
-          <FormField label="Appointment"><Select value="" onChange={() => {}} options={[{value:"",label:"Select appointment"},...APPOINTMENTS_DATA.map(a => ({value:a.id,label:`${a.id} · ${a.patient}`}))]} style={{width:"100%"}} /></FormField>
-          <FormField label="Consultation Fee"><TextInput value="" onChange={() => {}} placeholder="0.00" /></FormField>
-          <FormField label="Additional Services"><TextInput value="" onChange={() => {}} placeholder="Lab, X-Ray etc." /></FormField>
-          <FormField label="Discount ($)"><TextInput value="" onChange={() => {}} placeholder="0.00" /></FormField>
-          <FormField label="Payment Method"><Select value="" onChange={() => {}} options={[{value:"",label:"Select"},{value:"Cash",label:"Cash"},{value:"Card",label:"Card"},{value:"Insurance",label:"Insurance"}]} style={{width:"100%"}} /></FormField>
+          <FormField label="Patient">
+            <select style={inputStyle} value={form.patientId} onChange={(e) => updateForm("patientId", e.target.value)}>
+              <option value="" style={{ background:"#0D1B2E" }}>Select patient</option>
+              {patients.map((p) => <option key={p.id} value={p.id} style={{ background:"#0D1B2E" }}>{p.name}</option>)}
+            </select>
+          </FormField>
+
+          <FormField label="Appointment (optional)">
+            <select style={inputStyle} value={form.appointmentId} onChange={(e) => updateForm("appointmentId", e.target.value)}>
+              <option value="" style={{ background:"#0D1B2E" }}>No appointment selected</option>
+              {appointments.map((a) => <option key={a.id} value={a.id} style={{ background:"#0D1B2E" }}>{a.label}</option>)}
+            </select>
+          </FormField>
+
+          <FormField label="Service Name"><TextInput value={form.serviceName} onChange={(v) => updateForm("serviceName", v)} placeholder="General Consultation" /></FormField>
+          <FormField label="Department"><TextInput value={form.department} onChange={(v) => updateForm("department", v)} placeholder="Emergency" /></FormField>
+          <FormField label="Total Amount"><TextInput value={form.totalAmount} onChange={(v) => updateForm("totalAmount", v)} placeholder="25" /></FormField>
+          <FormField label="Paid Amount"><TextInput value={form.paidAmount} onChange={(v) => updateForm("paidAmount", v)} placeholder="0" /></FormField>
+
+          <FormField label="Payment Method">
+            <select style={inputStyle} value={form.paymentMethod} onChange={(e) => updateForm("paymentMethod", e.target.value)}>
+              <option value="cash" style={{ background:"#0D1B2E" }}>Cash</option>
+              <option value="card" style={{ background:"#0D1B2E" }}>Card</option>
+              <option value="mobile_money" style={{ background:"#0D1B2E" }}>Mobile Money</option>
+              <option value="bank_transfer" style={{ background:"#0D1B2E" }}>Bank Transfer</option>
+              <option value="insurance" style={{ background:"#0D1B2E" }}>Insurance</option>
+            </select>
+          </FormField>
+
+          <FormField label="Status">
+            <select style={inputStyle} value={form.status} onChange={(e) => updateForm("status", e.target.value)}>
+              <option value="Unpaid" style={{ background:"#0D1B2E" }}>Unpaid</option>
+              <option value="Partial" style={{ background:"#0D1B2E" }}>Partial</option>
+              <option value="Paid" style={{ background:"#0D1B2E" }}>Paid</option>
+              <option value="Cancelled" style={{ background:"#0D1B2E" }}>Cancelled</option>
+            </select>
+          </FormField>
         </div>
+
+        <div style={{ marginTop:16 }}>
+          <FormField label="Description"><TextInput value={form.description} onChange={(v) => updateForm("description", v)} placeholder="Consultation fee / lab service / treatment notes" /></FormField>
+          <FormField label="Notes"><TextInput value={form.notes} onChange={(v) => updateForm("notes", v)} placeholder="Billing notes" /></FormField>
+        </div>
+
         <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <AmberBtn onClick={() => setShowModal(false)}>Generate Invoice</AmberBtn>
-          <GhostBtn onClick={() => setShowModal(false)}>Cancel</GhostBtn>
+          <AmberBtn onClick={saveInvoice}>{saving ? "Saving..." : form.id ? "Update Invoice" : "Generate Invoice"}</AmberBtn>
+          <GhostBtn onClick={closeModal}>Cancel</GhostBtn>
         </div>
       </Modal>
     </div>
