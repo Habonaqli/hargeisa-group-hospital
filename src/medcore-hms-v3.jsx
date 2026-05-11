@@ -1428,93 +1428,389 @@ function AppointmentsPage() {
 //  PHARMACY
 // ═══════════════════════════════════════════════════════════════════════════════
 function PharmacyPage() {
+  const emptyForm = {
+    id: "",
+    medicineCode: "",
+    name: "",
+    category: "",
+    dosageForm: "",
+    strength: "",
+    batchNo: "",
+    supplier: "",
+    quantity: "",
+    reorderLevel: "10",
+    unitPrice: "",
+    expiryDate: "",
+    location: "",
+    notes: "",
+  };
+
+  const [medicines, setMedicines] = useState([]);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("all");
-  const [showModal, setShowModal] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
-  const categories = ["all", ...new Set(MEDICINES_DATA.map(m => m.category))];
-  const filtered = MEDICINES_DATA.filter(m =>
-    (catFilter === "all" || m.category === catFilter) &&
-    Object.values(m).some(v => String(v).toLowerCase().includes(search.toLowerCase()))
-  );
+  const normalizeMedicine = (item, index = 0) => {
+    const id = item._id || item.id || `MED-${String(index + 1).padStart(3, "0")}`;
+    return {
+      ...item,
+      id,
+      medicineCode: item.medicineCode || `MED-${String(index + 1).padStart(3, "0")}`,
+      name: item.name || "Unnamed Medicine",
+      category: item.category || "General",
+      dosageForm: item.dosageForm || item.unit || "",
+      strength: item.strength || "",
+      batchNo: item.batchNo || "",
+      supplier: item.supplier || "",
+      quantity: Number(item.quantity ?? item.stock ?? 0),
+      stock: Number(item.quantity ?? item.stock ?? 0),
+      reorderLevel: Number(item.reorderLevel ?? item.min ?? 0),
+      min: Number(item.reorderLevel ?? item.min ?? 0),
+      unitPrice: Number(item.unitPrice ?? item.price ?? 0),
+      price: Number(item.unitPrice ?? item.price ?? 0),
+      totalValue: Number(item.totalValue || 0),
+      expiryDate: item.expiryDate || item.expiry || "",
+      expiry: item.expiryDate || item.expiry || "",
+      status: item.status || "In Stock",
+      location: item.location || "",
+      notes: item.notes || "",
+    };
+  };
 
-  const alerts = MEDICINES_DATA.filter(m => m.status !== "In Stock");
+  const loadMedicines = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/pharmacy");
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : [];
+      if (!response.ok) throw new Error(data.message || "Failed to load pharmacy stock");
+      setMedicines(Array.isArray(data) ? data.map(normalizeMedicine) : []);
+    } catch (err) {
+      setError(err.message || "Unable to load pharmacy stock");
+      setMedicines([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMedicines();
+  }, [loadMedicines]);
+
+  const updateForm = (key, value) => {
+    setForm((f) => ({ ...f, [key]: value }));
+  };
+
+  const resetForm = () => {
+    setForm(emptyForm);
+    setFormOpen(false);
+  };
+
+  const addMedicine = () => {
+    setMessage("");
+    setError("");
+    setForm(emptyForm);
+    setFormOpen(true);
+  };
+
+  const editMedicine = (medicine) => {
+    setMessage("");
+    setError("");
+    setForm({
+      id: medicine.id,
+      medicineCode: medicine.medicineCode || "",
+      name: medicine.name || "",
+      category: medicine.category || "",
+      dosageForm: medicine.dosageForm || "",
+      strength: medicine.strength || "",
+      batchNo: medicine.batchNo || "",
+      supplier: medicine.supplier || "",
+      quantity: String(medicine.quantity ?? ""),
+      reorderLevel: String(medicine.reorderLevel ?? 10),
+      unitPrice: String(medicine.unitPrice ?? ""),
+      expiryDate: medicine.expiryDate || "",
+      location: medicine.location || "",
+      notes: medicine.notes || "",
+    });
+    setFormOpen(true);
+  };
+
+  const saveMedicine = async () => {
+    if (!form.name.trim()) {
+      setError("Medicine name is required");
+      return;
+    }
+    if (!form.category.trim()) {
+      setError("Category is required");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const isEditing = Boolean(form.id);
+      const payload = {
+        ...form,
+        quantity: Number(form.quantity || 0),
+        reorderLevel: Number(form.reorderLevel || 10),
+        unitPrice: Number(form.unitPrice || 0),
+      };
+      const response = await fetch("/api/pharmacy", {
+        method: isEditing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isEditing ? { ...payload, id: form.id } : payload),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Medicine save failed");
+      setMessage(isEditing ? "Medicine updated successfully" : "Medicine added successfully");
+      resetForm();
+      await loadMedicines();
+    } catch (err) {
+      setError(err.message || "Unable to save medicine");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteMedicine = async (medicine) => {
+    if (!window.confirm(`Delete medicine record for ${medicine.name}?`)) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/pharmacy", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: medicine.id }),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Medicine delete failed");
+      setMessage("Medicine deleted successfully");
+      await loadMedicines();
+    } catch (err) {
+      setError(err.message || "Unable to delete medicine");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const quickStock = async (medicine, change) => {
+    const nextQty = Math.max(0, Number(medicine.quantity || 0) + change);
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/pharmacy", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: medicine.id, quantity: nextQty }),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
+      if (!response.ok) throw new Error(data.message || "Stock update failed");
+      setMessage(`Stock updated for ${medicine.name}`);
+      await loadMedicines();
+    } catch (err) {
+      setError(err.message || "Unable to update stock");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const categories = ["all", ...new Set(medicines.map((m) => m.category).filter(Boolean))];
+
+  const filtered = medicines.filter((m) => {
+    const byCategory = catFilter === "all" || m.category === catFilter;
+    const byStatus = statusFilter === "all" || m.status === statusFilter;
+    const q = search.toLowerCase();
+    const bySearch = [m.medicineCode, m.name, m.category, m.dosageForm, m.strength, m.batchNo, m.supplier, m.status, m.location]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+    return byCategory && byStatus && bySearch;
+  });
+
+  const alerts = medicines.filter((m) => m.status !== "In Stock");
+  const totalValue = medicines.reduce((sum, m) => sum + Number(m.totalValue || (m.quantity * m.unitPrice) || 0), 0);
+
+  const inputStyle = {
+    width: "100%",
+    background: "rgba(255,255,255,0.06)",
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+    color: C.text,
+    fontFamily: C.mono,
+    fontSize: 12,
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const labelStyle = {
+    fontFamily: C.mono,
+    fontSize: 10,
+    color: C.muted,
+    letterSpacing: ".08em",
+    textTransform: "uppercase",
+    marginBottom: 6,
+  };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
-      <SectionHeader title="Pharmacy & Inventory" subtitle={`${MEDICINES_DATA.length} medicines`}
-        action={<div style={{ display:"flex", gap:10 }}><GhostBtn onClick={() => exportCSV(filtered,"medicines")}>⬇ Export</GhostBtn><AmberBtn onClick={() => setShowModal(true)}>+ Add Medicine</AmberBtn></div>} />
+      <SectionHeader
+        title="Pharmacy & Inventory"
+        subtitle={`${filtered.length} real medicines from MongoDB`}
+        action={
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <GhostBtn onClick={loadMedicines}>Refresh Stock</GhostBtn>
+            <GhostBtn onClick={() => exportCSV(filtered,"pharmacy-stock")}>⬇ Export</GhostBtn>
+            <AmberBtn onClick={addMedicine}>+ Add Medicine</AmberBtn>
+          </div>
+        }
+      />
 
-      {/* Alerts */}
+      {(message || error) && (
+        <div style={{
+          border: `1px solid ${error ? "rgba(248,113,113,.35)" : "rgba(52,211,153,.35)"}`,
+          background: error ? "rgba(248,113,113,.12)" : "rgba(52,211,153,.12)",
+          color: error ? C.red : C.green,
+          padding: "12px 14px",
+          borderRadius: 12,
+          fontFamily: C.mono,
+          fontSize: 12,
+        }}>
+          {error ? "❌" : "✅"} {error || message}
+        </div>
+      )}
+
       {alerts.length > 0 && (
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-          {alerts.map(m => (
-            <div key={m.id} style={{ background:"rgba(248,113,113,0.07)", border:`1px solid rgba(248,113,113,0.2)`, borderRadius:10, padding:"10px 18px", display:"flex", alignItems:"center", gap:12 }}>
+          {alerts.slice(0, 5).map((m) => (
+            <div key={m.id} style={{ background:"rgba(248,113,113,0.07)", border:`1px solid rgba(248,113,113,0.2)`, borderRadius:10, padding:"10px 18px", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
               <span style={{ fontSize:14 }}>{m.status === "Out of Stock" ? "🚫" : m.status === "Low Stock" ? "⚠️" : "⏰"}</span>
-              <span style={{ fontFamily:C.mono, fontSize:12, color:C.red }}>{m.status.toUpperCase()}</span>
+              <span style={{ fontFamily:C.mono, fontSize:12, color:C.red }}>{String(m.status).toUpperCase()}</span>
               <span style={{ fontSize:13, color:C.text }}>{m.name}</span>
-              <span style={{ fontSize:12, color:C.muted }}>Stock: {m.stock} units · Min: {m.min}</span>
-              {m.status === "Expiring Soon" && <span style={{ fontSize:12, color:"#FB923C" }}>Expires: {m.expiry}</span>}
+              <span style={{ fontSize:12, color:C.muted }}>Qty: {m.quantity} · Reorder: {m.reorderLevel}</span>
+              {m.expiryDate && <span style={{ fontSize:12, color:"#FB923C" }}>Expiry: {m.expiryDate}</span>}
             </div>
           ))}
         </div>
       )}
 
-      {/* Summary */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
-        {[
-          { label:"Total Medicines",  val:MEDICINES_DATA.length,                      color:C.blue  },
-          { label:"In Stock",         val:MEDICINES_DATA.filter(m=>m.status==="In Stock").length, color:C.green },
-          { label:"Low / Out",        val:MEDICINES_DATA.filter(m=>m.status!=="In Stock"&&m.status!=="Expiring Soon").length, color:C.red },
-          { label:"Expiring Soon",    val:MEDICINES_DATA.filter(m=>m.status==="Expiring Soon").length, color:"#FB923C" },
-        ].map(s => (
-          <Card key={s.label} style={{ padding:"16px 20px" }}>
-            <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:".06em", marginBottom:6 }}>{s.label}</div>
-            <div style={{ fontFamily:C.serif, fontSize:26, color:s.color, fontWeight:700 }}>{s.val}</div>
-          </Card>
-        ))}
+        <StatCard label="Total Medicines" value={medicines.length} icon="💊" accent={C.blue} />
+        <StatCard label="In Stock" value={medicines.filter((m)=>m.status==="In Stock").length} icon="✅" accent={C.green} />
+        <StatCard label="Low / Out" value={medicines.filter((m)=>m.status==="Low Stock" || m.status==="Out of Stock").length} icon="⚠️" accent={C.red} />
+        <StatCard label="Stock Value" value={`$${totalValue.toFixed(2)}`} icon="💵" accent={C.amber} />
       </div>
 
+      {formOpen && (
+        <Card style={{ padding: 20 }}>
+          <div style={{ fontFamily: C.serif, fontSize: 20, color: C.text, fontWeight: 700, marginBottom: 16 }}>
+            {form.id ? "Edit Medicine" : "Add New Medicine"}
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14 }}>
+            <div><div style={labelStyle}>Medicine Code</div><input style={inputStyle} value={form.medicineCode} onChange={(e)=>updateForm("medicineCode", e.target.value)} placeholder="Auto if blank" /></div>
+            <div><div style={labelStyle}>Medicine Name</div><input style={inputStyle} value={form.name} onChange={(e)=>updateForm("name", e.target.value)} placeholder="Paracetamol" /></div>
+            <div><div style={labelStyle}>Category</div><input style={inputStyle} value={form.category} onChange={(e)=>updateForm("category", e.target.value)} placeholder="Pain Relief" /></div>
+            <div><div style={labelStyle}>Dosage Form</div><input style={inputStyle} value={form.dosageForm} onChange={(e)=>updateForm("dosageForm", e.target.value)} placeholder="Tablet" /></div>
+            <div><div style={labelStyle}>Strength</div><input style={inputStyle} value={form.strength} onChange={(e)=>updateForm("strength", e.target.value)} placeholder="500mg" /></div>
+            <div><div style={labelStyle}>Batch No</div><input style={inputStyle} value={form.batchNo} onChange={(e)=>updateForm("batchNo", e.target.value)} placeholder="BATCH-001" /></div>
+            <div><div style={labelStyle}>Supplier</div><input style={inputStyle} value={form.supplier} onChange={(e)=>updateForm("supplier", e.target.value)} placeholder="Supplier name" /></div>
+            <div><div style={labelStyle}>Quantity</div><input style={inputStyle} type="number" value={form.quantity} onChange={(e)=>updateForm("quantity", e.target.value)} placeholder="120" /></div>
+            <div><div style={labelStyle}>Reorder Level</div><input style={inputStyle} type="number" value={form.reorderLevel} onChange={(e)=>updateForm("reorderLevel", e.target.value)} placeholder="20" /></div>
+            <div><div style={labelStyle}>Unit Price</div><input style={inputStyle} type="number" value={form.unitPrice} onChange={(e)=>updateForm("unitPrice", e.target.value)} placeholder="0.15" /></div>
+            <div><div style={labelStyle}>Expiry Date</div><input style={inputStyle} type="date" value={form.expiryDate} onChange={(e)=>updateForm("expiryDate", e.target.value)} /></div>
+            <div><div style={labelStyle}>Location</div><input style={inputStyle} value={form.location} onChange={(e)=>updateForm("location", e.target.value)} placeholder="Shelf A1" /></div>
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <div style={labelStyle}>Notes</div>
+            <input style={inputStyle} value={form.notes} onChange={(e)=>updateForm("notes", e.target.value)} placeholder="Stock notes" />
+          </div>
+
+          <div style={{ display:"flex", gap:10, marginTop:16 }}>
+            <AmberBtn onClick={saveMedicine}>{saving ? "Saving..." : form.id ? "Update Medicine" : "Add Medicine"}</AmberBtn>
+            <GhostBtn onClick={resetForm}>Cancel</GhostBtn>
+          </div>
+        </Card>
+      )}
+
       <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-        <SearchBar value={search} onChange={setSearch} placeholder="Search medicines..." />
-        <Select value={catFilter} onChange={setCatFilter} options={categories.map(c => ({ value:c, label: c === "all" ? "All Categories" : c }))} />
+        <SearchBar value={search} onChange={setSearch} placeholder="Search real medicines..." />
+        <Select value={catFilter} onChange={setCatFilter} options={categories.map((c) => ({ value:c, label: c === "all" ? "All Categories" : c }))} />
+        <Select value={statusFilter} onChange={setStatusFilter} options={[
+          { value:"all", label:"All Status" },
+          { value:"In Stock", label:"In Stock" },
+          { value:"Low Stock", label:"Low Stock" },
+          { value:"Out of Stock", label:"Out of Stock" },
+          { value:"Expiring Soon", label:"Expiring Soon" },
+          { value:"Expired", label:"Expired" },
+        ]} />
       </div>
 
       <Card>
-        <DataTable
-          columns={["Med ID","Name","Category","Stock","Min","Unit","Expiry","Supplier","Price","Status"]}
-          rows={filtered}
-          renderRow={(m,i) => (
-            <tr key={m.id}>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{m.id}</td>
-              <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{m.name}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{m.category}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color: m.stock === 0 ? C.red : m.stock < m.min ? C.amber : C.green, fontWeight:700}}>{m.stock}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.muted}}>{m.min}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{m.unit}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color: m.status==="Expiring Soon" ? "#FB923C" : C.muted}}>{m.expiry}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{m.supplier}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.green, fontWeight:700}}>${m.price}</td>
-              <td style={td(i)}><Badge status={m.status} /></td>
-            </tr>
-          )} />
+        {loading ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>Loading real pharmacy stock...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>No medicines found. Click + Add Medicine to add stock.</div>
+        ) : (
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:"rgba(0,0,0,0.2)" }}>
+                  {["Code","Name","Category","Form","Strength","Qty","Reorder","Expiry","Supplier","Unit Price","Value","Status","Action"].map((h) => (
+                    <th key={h} style={{ padding:"11px 14px", textAlign:"left", fontSize:10, color:C.faint, fontFamily:C.mono, letterSpacing:".08em", textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m, i) => (
+                  <tr key={m.id}>
+                    <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{m.medicineCode}</td>
+                    <td style={{...td(i), color:C.text, fontSize:13, fontWeight:600}}>{m.name}</td>
+                    <td style={{...td(i), fontSize:12, color:C.muted}}>{m.category}</td>
+                    <td style={{...td(i), fontSize:12, color:C.muted}}>{m.dosageForm || "N/A"}</td>
+                    <td style={{...td(i), fontSize:12, color:C.muted}}>{m.strength || "N/A"}</td>
+                    <td style={{...td(i), fontFamily:C.mono, fontSize:13, color: m.quantity === 0 ? C.red : m.quantity <= m.reorderLevel ? C.amber : C.green, fontWeight:700}}>{m.quantity}</td>
+                    <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.muted}}>{m.reorderLevel}</td>
+                    <td style={{...td(i), fontFamily:C.mono, fontSize:11, color: m.status==="Expiring Soon" || m.status==="Expired" ? "#FB923C" : C.muted}}>{m.expiryDate || "N/A"}</td>
+                    <td style={{...td(i), fontSize:12, color:C.muted}}>{m.supplier || "N/A"}</td>
+                    <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.green}}>${Number(m.unitPrice || 0).toFixed(2)}</td>
+                    <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.text}}>${Number(m.totalValue || m.quantity * m.unitPrice || 0).toFixed(2)}</td>
+                    <td style={td(i)}><Badge status={m.status} /></td>
+                    <td style={td(i)}>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                        <GhostBtn onClick={() => quickStock(m, -1)} color={C.amber}>-1</GhostBtn>
+                        <GhostBtn onClick={() => quickStock(m, 1)} color={C.green}>+1</GhostBtn>
+                        <GhostBtn onClick={() => editMedicine(m)} color={C.blue}>Edit</GhostBtn>
+                        <GhostBtn onClick={() => deleteMedicine(m)} color={C.red}>Delete</GhostBtn>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Medicine to Inventory">
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-          {[["Medicine Name",""],["Category",""],["Stock Quantity",""],["Minimum Stock",""],["Unit","e.g. Tablet"],["Expiry Date","2027-01-01"],["Supplier",""],["Cost Price",""],["Selling Price",""]].map(([l,ph]) => (
-            <FormField key={l} label={l}><TextInput value="" onChange={() => {}} placeholder={ph} /></FormField>
-          ))}
-        </div>
-        <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <AmberBtn onClick={() => setShowModal(false)}>Add Medicine</AmberBtn>
-          <GhostBtn onClick={() => setShowModal(false)}>Cancel</GhostBtn>
-        </div>
-      </Modal>
+      <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>
+        This page now reads and writes real pharmacy inventory from MongoDB. Demo medicine data is no longer displayed here.
+      </div>
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LABORATORY
 // ═══════════════════════════════════════════════════════════════════════════════
