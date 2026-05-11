@@ -1792,50 +1792,192 @@ function BillingPage() {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  DOCTORS PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
+
 function DoctorsPage() {
   const [search, setSearch] = useState("");
+  const [doctors, setDoctors] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
-  const filtered = DOCTORS_DATA.filter(d =>
-    Object.values(d).some(v => String(v).toLowerCase().includes(search.toLowerCase()))
-  );
+
+  const normalizeDoctor = (doctor, index = 0) => {
+    const rawName = doctor.fullName || doctor.name || "Unnamed Doctor";
+    const displayName = rawName.toLowerCase().startsWith("dr.") ? rawName : `Dr. ${rawName}`;
+
+    return {
+      ...doctor,
+      id: doctor._id || doctor.id || `D-${String(index + 1).padStart(3, "0")}`,
+      doctorCode: doctor.doctorCode || `D-${String(index + 1).padStart(3, "0")}`,
+      name: displayName,
+      fullName: rawName,
+      spec: doctor.specialization || doctor.spec || doctor.position || "General Doctor",
+      dept: doctor.department || doctor.dept || "General",
+      email: doctor.email || "N/A",
+      phone: doctor.phone || "N/A",
+      fee: Number(doctor.fee || 0),
+      avail: doctor.availability || doctor.avail || "Not set",
+      patients: Number(doctor.patients || 0),
+      rating: Number(doctor.rating || 0),
+      status: doctor.status || "Active",
+      role: doctor.role || "doctor",
+      createdAt: doctor.createdAt || "",
+      approvedAt: doctor.approvedAt || "",
+    };
+  };
+
+  const loadDoctors = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/doctors");
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : [];
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to load doctors");
+      }
+
+      setDoctors(Array.isArray(data) ? data.map(normalizeDoctor) : []);
+    } catch (err) {
+      setError(err.message || "Unable to load doctors");
+      setDoctors([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDoctors();
+  }, [loadDoctors]);
+
+  const filtered = doctors.filter((d) => {
+    const q = search.toLowerCase();
+    return [
+      d.doctorCode,
+      d.name,
+      d.fullName,
+      d.spec,
+      d.dept,
+      d.email,
+      d.phone,
+      d.status,
+      d.avail,
+    ].some((v) => String(v || "").toLowerCase().includes(q));
+  });
+
+  const activeCount = doctors.filter((d) => d.status === "Active").length;
+  const inactiveCount = doctors.filter((d) => d.status !== "Active").length;
+  const departmentsCount = new Set(doctors.map((d) => d.dept).filter(Boolean)).size;
+
+  const openRegisterPage = () => {
+    window.location.href = "/?register=1";
+  };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
-      <SectionHeader title="Medical Staff" subtitle={`${filtered.length} doctors`}
-        action={<div style={{ display:"flex", gap:10 }}><GhostBtn onClick={() => exportCSV(filtered,"doctors")}>⬇ Export</GhostBtn><AmberBtn onClick={() => setShowModal(true)}>+ New Doctor</AmberBtn></div>} />
-      <SearchBar value={search} onChange={setSearch} placeholder="Search doctors..." />
-      <Card>
-        <DataTable
-          columns={["Doctor ID","Name","Specialization","Department","Fee","Availability","Patients","Rating","Status"]}
-          rows={filtered}
-          renderRow={(d,i) => (
-            <tr key={d.id}>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{d.id}</td>
-              <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{d.name}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{d.spec}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{d.dept}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.green, fontWeight:700}}>${d.fee}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{d.avail}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.text, textAlign:"center"}}>{d.patients}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.amber}}>★ {d.rating}</td>
-              <td style={td(i)}><Badge status={d.status} /></td>
-            </tr>
-          )} />
-      </Card>
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add Doctor">
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-          {[["Full Name",""],["Specialization","e.g. Cardiologist"],["Email",""],["Phone",""],["Consultation Fee",""],["Available Days","e.g. Mon Wed Fri"]].map(([l,ph]) => (
-            <FormField key={l} label={l}><TextInput value="" onChange={() => {}} placeholder={ph} /></FormField>
-          ))}
-          <FormField label="Department"><Select value="" onChange={() => {}} options={[{value:"",label:"Select dept"},...["Cardiology","Neurology","Pediatrics","Orthopedics","Dermatology"].map(d=>({value:d,label:d}))]} style={{width:"100%"}} /></FormField>
+      <SectionHeader
+        title="Medical Staff"
+        subtitle={`${filtered.length} real doctors from MongoDB`}
+        action={
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <GhostBtn onClick={loadDoctors}>Refresh Doctors</GhostBtn>
+            <GhostBtn onClick={() => exportCSV(filtered,"doctors")} color={C.green}>⬇ Export</GhostBtn>
+            <AmberBtn onClick={() => setShowModal(true)}>+ New Doctor</AmberBtn>
+          </div>
+        }
+      />
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:16 }}>
+        <StatCard label="Total Doctors" value={doctors.length} icon="🩺" accent={C.blue} />
+        <StatCard label="Active" value={activeCount} icon="✅" accent={C.green} />
+        <StatCard label="Departments" value={departmentsCount} icon="🏥" accent={C.amber} />
+        <StatCard label="Inactive" value={inactiveCount} icon="⛔" accent={C.red} />
+      </div>
+
+      {(message || error) && (
+        <div style={{
+          border: `1px solid ${error ? "rgba(248,113,113,.35)" : "rgba(52,211,153,.35)"}`,
+          background: error ? "rgba(248,113,113,.12)" : "rgba(52,211,153,.12)",
+          color: error ? C.red : C.green,
+          padding: "12px 14px",
+          borderRadius: 12,
+          fontFamily: C.mono,
+          fontSize: 12,
+        }}>
+          {error ? "❌" : "✅"} {error || message}
         </div>
-        <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <AmberBtn onClick={() => setShowModal(false)}>Add Doctor</AmberBtn>
-          <GhostBtn onClick={() => setShowModal(false)}>Cancel</GhostBtn>
+      )}
+
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+        <SearchBar value={search} onChange={setSearch} placeholder="Search real doctors..." />
+      </div>
+
+      <Card>
+        {loading ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>
+            Loading real doctors from MongoDB...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding:28, color:C.muted, fontFamily:C.mono }}>
+            No doctors found. Register a user, then approve with role = doctor from User Approvals.
+          </div>
+        ) : (
+          <DataTable
+            columns={["Doctor ID","Name","Specialization","Department","Email","Phone","Fee","Availability","Patients","Rating","Status"]}
+            rows={filtered}
+            renderRow={(d,i) => (
+              <tr key={d.id}>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{d.doctorCode}</td>
+                <td style={{...td(i), color:C.text, fontSize:13, fontWeight:600}}>{d.name}</td>
+                <td style={{...td(i), fontSize:12, color:C.muted}}>{d.spec}</td>
+                <td style={{...td(i), fontSize:12, color:C.muted}}>{d.dept}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.blue}}>{d.email}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{d.phone}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.green, fontWeight:700}}>{d.fee ? `$${d.fee}` : "N/A"}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{d.avail}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.text, textAlign:"center"}}>{d.patients}</td>
+                <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.amber}}>{d.rating ? `★ ${d.rating}` : "N/A"}</td>
+                <td style={td(i)}><Badge status={d.status} /></td>
+              </tr>
+            )}
+          />
+        )}
+      </Card>
+
+      <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>
+        This page now reads real doctors from MongoDB users where role = doctor. Demo doctors are no longer displayed here.
+      </div>
+
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add New Doctor">
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div style={{ color:C.text, fontSize:14, lineHeight:1.7 }}>
+            New doctors should register through the public registration page. After registration, admin must approve the account and select role <b>Doctor</b>.
+          </div>
+
+          <Card style={{ padding:16, background:"rgba(245,158,11,0.08)", border:"1px solid rgba(245,158,11,0.25)" }}>
+            <div style={{ fontFamily:C.mono, fontSize:12, color:C.amber, marginBottom:6 }}>Doctor Workflow</div>
+            <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted, lineHeight:1.8 }}>
+              1. Doctor opens registration link<br />
+              2. Doctor submits account request<br />
+              3. Admin opens User Approvals<br />
+              4. Admin selects role Doctor and approves<br />
+              5. Doctor appears automatically on this page
+            </div>
+          </Card>
+
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <AmberBtn onClick={openRegisterPage}>Open Register Page</AmberBtn>
+            <GhostBtn onClick={() => setShowModal(false)}>Close</GhostBtn>
+          </div>
         </div>
       </Modal>
     </div>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  REPORTS & ANALYTICS
