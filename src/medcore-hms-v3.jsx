@@ -2275,79 +2275,470 @@ function LaboratoryPage() {
 //  INPATIENT / WARDS
 // ═══════════════════════════════════════════════════════════════════════════════
 function InpatientsPage() {
-  const [showModal, setShowModal] = useState(false);
-  const totalBeds = WARDS_DATA.reduce((s,w) => s + w.beds, 0);
-  const totalOccupied = WARDS_DATA.reduce((s,w) => s + w.occupied, 0);
+  const emptyWardForm = { id: "", name: "", department: "", floor: "", wardType: "General", capacity: "10", status: "Active", notes: "" };
+  const emptyBedForm = { id: "", wardId: "", bedNumber: "", bedType: "General", status: "Available", notes: "" };
+  const emptyAdmissionForm = { patientId: "", doctorId: "", wardId: "", bedId: "", admissionDate: "", admissionTime: "", diagnosis: "", reason: "", condition: "Stable", notes: "" };
+  const emptyDischargeForm = { admissionId: "", dischargeType: "Recovered", finalDiagnosis: "", dischargeSummary: "", instructions: "", followUpDate: "", bedNextStatus: "Cleaning", notes: "" };
+
+  const [tab, setTab] = useState("overview");
+  const [wards, setWards] = useState([]);
+  const [beds, setBeds] = useState([]);
+  const [admissions, setAdmissions] = useState([]);
+  const [discharges, setDischarges] = useState([]);
+  const [patients, setPatients] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const [wardModal, setWardModal] = useState(false);
+  const [bedModal, setBedModal] = useState(false);
+  const [admitModal, setAdmitModal] = useState(false);
+  const [dischargeModal, setDischargeModal] = useState(false);
+
+  const [wardForm, setWardForm] = useState(emptyWardForm);
+  const [bedForm, setBedForm] = useState(emptyBedForm);
+  const [admissionForm, setAdmissionForm] = useState(emptyAdmissionForm);
+  const [dischargeForm, setDischargeForm] = useState(emptyDischargeForm);
+
+  const inputStyle = {
+    width: "100%",
+    background: "rgba(255,255,255,0.06)",
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+    color: C.text,
+    fontFamily: C.mono,
+    fontSize: 12,
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const loadBedWardData = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [wardsRes, bedsRes, admissionsRes, dischargesRes, patientsRes, doctorsRes] = await Promise.all([
+        fetch("/api/bedward?type=wards"),
+        fetch("/api/bedward?type=beds"),
+        fetch("/api/bedward?type=admissions"),
+        fetch("/api/bedward?type=discharges"),
+        fetch("/api/patients"),
+        fetch("/api/doctors"),
+      ]);
+
+      const responses = [wardsRes, bedsRes, admissionsRes, dischargesRes, patientsRes, doctorsRes];
+      const payloads = await Promise.all(responses.map(async (r) => {
+        const text = await r.text();
+        const data = text ? JSON.parse(text) : [];
+        if (!r.ok) throw new Error(data.message || "Failed to load bed and ward data");
+        return data;
+      }));
+
+      setWards(Array.isArray(payloads[0]) ? payloads[0] : []);
+      setBeds(Array.isArray(payloads[1]) ? payloads[1] : []);
+      setAdmissions(Array.isArray(payloads[2]) ? payloads[2] : []);
+      setDischarges(Array.isArray(payloads[3]) ? payloads[3] : []);
+      setPatients(Array.isArray(payloads[4]) ? payloads[4] : []);
+      setDoctors(Array.isArray(payloads[5]) ? payloads[5] : []);
+    } catch (err) {
+      setError(err.message || "Unable to load bed and ward data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadBedWardData();
+  }, [loadBedWardData]);
+
+  const showSuccess = async (msg) => {
+    setMessage(msg);
+    setError("");
+    await loadBedWardData();
+  };
+
+  const apiRequest = async (url, method, body) => {
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!response.ok) throw new Error(data.message || "Request failed");
+    return data;
+  };
+
+  const saveWard = async () => {
+    if (!wardForm.name.trim()) return setError("Ward name is required");
+    if (!wardForm.department.trim()) return setError("Department is required");
+    setSaving(true);
+    try {
+      await apiRequest("/api/bedward?type=wards", wardForm.id ? "PUT" : "POST", {
+        ...wardForm,
+        capacity: Number(wardForm.capacity || 0),
+      });
+      setWardModal(false);
+      setWardForm(emptyWardForm);
+      await showSuccess(wardForm.id ? "Ward updated successfully" : "Ward added successfully");
+    } catch (err) {
+      setError(err.message || "Unable to save ward");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editWard = (ward) => {
+    setWardForm({
+      id: ward._id,
+      name: ward.name || "",
+      department: ward.department || "",
+      floor: ward.floor || "",
+      wardType: ward.wardType || "General",
+      capacity: String(ward.capacity || 0),
+      status: ward.status || "Active",
+      notes: ward.notes || "",
+    });
+    setWardModal(true);
+  };
+
+  const deleteWard = async (ward) => {
+    if (!window.confirm(`Delete ward ${ward.name}?`)) return;
+    setSaving(true);
+    try {
+      await apiRequest("/api/bedward?type=wards", "DELETE", { id: ward._id });
+      await showSuccess("Ward deleted successfully");
+    } catch (err) {
+      setError(err.message || "Unable to delete ward");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveBed = async () => {
+    if (!bedForm.wardId) return setError("Ward is required");
+    if (!bedForm.bedNumber.trim()) return setError("Bed number is required");
+    setSaving(true);
+    try {
+      await apiRequest("/api/bedward?type=beds", bedForm.id ? "PUT" : "POST", bedForm);
+      setBedModal(false);
+      setBedForm(emptyBedForm);
+      await showSuccess(bedForm.id ? "Bed updated successfully" : "Bed added successfully");
+    } catch (err) {
+      setError(err.message || "Unable to save bed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editBed = (bed) => {
+    setBedForm({
+      id: bed._id,
+      wardId: bed.wardId || "",
+      bedNumber: bed.bedNumber || "",
+      bedType: bed.bedType || "General",
+      status: bed.status || "Available",
+      notes: bed.notes || "",
+    });
+    setBedModal(true);
+  };
+
+  const deleteBed = async (bed) => {
+    if (!window.confirm(`Delete bed ${bed.bedNumber}?`)) return;
+    setSaving(true);
+    try {
+      await apiRequest("/api/bedward?type=beds", "DELETE", { id: bed._id });
+      await showSuccess("Bed deleted successfully");
+    } catch (err) {
+      setError(err.message || "Unable to delete bed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const admitPatient = async () => {
+    if (!admissionForm.patientId) return setError("Patient is required");
+    if (!admissionForm.wardId) return setError("Ward is required");
+    if (!admissionForm.bedId) return setError("Available bed is required");
+    setSaving(true);
+    try {
+      await apiRequest("/api/bedward?type=admissions", "POST", admissionForm);
+      setAdmitModal(false);
+      setAdmissionForm(emptyAdmissionForm);
+      await showSuccess("Patient admitted successfully");
+    } catch (err) {
+      setError(err.message || "Unable to admit patient");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openDischarge = (admission) => {
+    setDischargeForm({
+      ...emptyDischargeForm,
+      admissionId: admission._id,
+      finalDiagnosis: admission.diagnosis || "",
+    });
+    setDischargeModal(true);
+  };
+
+  const dischargePatient = async () => {
+    if (!dischargeForm.admissionId) return setError("Admission is required");
+    setSaving(true);
+    try {
+      await apiRequest("/api/bedward?type=discharges", "POST", dischargeForm);
+      setDischargeModal(false);
+      setDischargeForm(emptyDischargeForm);
+      await showSuccess("Patient discharged successfully");
+    } catch (err) {
+      setError(err.message || "Unable to discharge patient");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const activeAdmissions = admissions.filter((a) => a.status === "Admitted");
+  const totalBeds = beds.length;
+  const occupiedBeds = beds.filter((b) => b.status === "Occupied").length;
+  const availableBeds = beds.filter((b) => b.status === "Available").length;
+  const cleaningBeds = beds.filter((b) => b.status === "Cleaning").length;
+  const maintenanceBeds = beds.filter((b) => b.status === "Maintenance").length;
+
+  const filteredBeds = beds.filter((b) => {
+    const byStatus = statusFilter === "all" || b.status === statusFilter;
+    const q = search.toLowerCase();
+    const bySearch = [b.bedNumber, b.bedCode, b.wardName, b.wardCode, b.bedType, b.status, b.patientName]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+    return byStatus && bySearch;
+  });
+
+  const filteredAdmissions = admissions.filter((a) => {
+    const q = search.toLowerCase();
+    return [a.admissionNo, a.patientName, a.doctorName, a.wardName, a.bedNumber, a.status, a.diagnosis, a.reason]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+  });
+
+  const wardOptions = [{ value: "", label: "Select ward" }, ...wards.map((w) => ({ value: w._id, label: `${w.name} (${w.availableBeds || 0} free)` }))];
+  const availableBedOptions = [{ value: "", label: "Select available bed" }, ...beds
+    .filter((b) => b.status === "Available" && (!admissionForm.wardId || b.wardId === admissionForm.wardId))
+    .map((b) => ({ value: b._id, label: `${b.bedNumber} · ${b.wardName}` }))];
+  const patientOptions = [{ value: "", label: "Select patient" }, ...patients.map((p) => ({ value: p._id || p.id, label: p.name || p.fullName || "Unnamed patient" }))];
+  const doctorOptions = [{ value: "", label: "Optional doctor" }, ...doctors.map((d) => ({ value: d._id || d.id, label: d.fullName || d.name || "Doctor" }))];
+
+  const tabBtn = (key, label) => (
+    <button onClick={() => setTab(key)} style={{ background: tab === key ? C.amberBg : "rgba(255,255,255,0.04)", border: `1px solid ${tab === key ? "rgba(245,158,11,.35)" : C.border}`, borderRadius: 10, padding: "8px 14px", color: tab === key ? C.amber : C.muted, fontFamily: C.mono, fontSize: 11, cursor: "pointer", fontWeight: tab === key ? 700 : 500 }}>
+      {label}
+    </button>
+  );
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
-      <SectionHeader title="Inpatient & Ward Management" subtitle={`${totalOccupied}/${totalBeds} beds occupied`}
-        action={<AmberBtn onClick={() => setShowModal(true)}>+ Admit Patient</AmberBtn>} />
+      <SectionHeader
+        title="Bed & Ward Management"
+        subtitle={`${activeAdmissions.length} active admissions · ${occupiedBeds}/${totalBeds || 0} beds occupied`}
+        action={
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <GhostBtn onClick={loadBedWardData}>Refresh</GhostBtn>
+            <AmberBtn onClick={() => { setWardForm(emptyWardForm); setWardModal(true); }}>+ Ward</AmberBtn>
+            <AmberBtn onClick={() => { setBedForm(emptyBedForm); setBedModal(true); }}>+ Bed</AmberBtn>
+            <AmberBtn onClick={() => { setAdmissionForm(emptyAdmissionForm); setAdmitModal(true); }}>+ Admit Patient</AmberBtn>
+          </div>
+        }
+      />
 
-      {/* Ward grid */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14 }}>
-        {WARDS_DATA.map(w => {
-          const pct = Math.round((w.occupied / w.beds) * 100);
-          const col = pct >= 100 ? C.red : pct >= 80 ? C.amber : C.green;
-          const free = w.beds - w.occupied;
-          return (
-            <Card key={w.id} style={{ padding:"20px 22px", position:"relative", overflow:"hidden" }}>
-              <div style={{ position:"absolute", top:0, left:0, bottom:0, width:3, background:col }} />
-              <div style={{ fontFamily:C.serif, fontSize:15, color:C.text, fontWeight:700, marginBottom:4, paddingLeft:10 }}>{w.name}</div>
-              <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, paddingLeft:10, marginBottom:14 }}>{w.floor} · {w.dept}</div>
-              <div style={{ height:6, background:"rgba(255,255,255,0.07)", borderRadius:4, margin:"0 10px", marginBottom:10 }}>
-                <div style={{ height:"100%", width:`${pct}%`, background:col, borderRadius:4, transition:"width .4s" }} />
-              </div>
-              <div style={{ display:"flex", justifyContent:"space-between", paddingLeft:10, paddingRight:10 }}>
-                <span style={{ fontFamily:C.mono, fontSize:11, color:col }}>{w.occupied} occupied</span>
-                <span style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>{free} free</span>
-                <span style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>{pct}%</span>
-              </div>
-            </Card>
-          );
-        })}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:14 }}>
+        <StatCard label="Total Beds" value={totalBeds} icon="🛏️" accent={C.blue} />
+        <StatCard label="Occupied" value={occupiedBeds} icon="🏥" accent={C.red} />
+        <StatCard label="Available" value={availableBeds} icon="✅" accent={C.green} />
+        <StatCard label="Cleaning" value={cleaningBeds} icon="🧹" accent={C.amber} />
+        <StatCard label="Maintenance" value={maintenanceBeds} icon="🔧" accent={C.purple} />
       </div>
 
-      {/* Inpatients table */}
-      <Card>
-        <div style={{ padding:"16px 20px", borderBottom:`1px solid ${C.border}` }}>
-          <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:".06em" }}>Current Inpatients</div>
+      {(message || error) && (
+        <div style={{ border:`1px solid ${error ? "rgba(248,113,113,.35)" : "rgba(52,211,153,.35)"}`, background:error ? "rgba(248,113,113,.12)" : "rgba(52,211,153,.12)", color:error ? C.red : C.green, padding:"12px 14px", borderRadius:12, fontFamily:C.mono, fontSize:12 }}>
+          {error ? "❌" : "✅"} {error || message}
         </div>
-        <DataTable
-          columns={["Admit ID","Patient","Ward","Bed","Admitted","Days","Doctor","Status","Action"]}
-          rows={INPATIENTS_DATA}
-          renderRow={(ip,i) => (
-            <tr key={ip.id}>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.blue}}>{ip.id}</td>
-              <td style={{...td(i), color:C.text, fontSize:13, fontWeight:500}}>{ip.patient}</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{ip.ward}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.amber, fontWeight:700}}>{ip.bed}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:12, color:C.muted}}>{ip.admitted}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:13, color:C.text, textAlign:"center"}}>{ip.days}d</td>
-              <td style={{...td(i), fontSize:12, color:C.muted}}>{ip.doctor}</td>
-              <td style={td(i)}><Badge status={ip.status} /></td>
-              <td style={td(i)}><GhostBtn color={C.red}>Discharge</GhostBtn></td>
+      )}
+
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+        {tabBtn("overview", "Overview")}
+        {tabBtn("wards", "Wards")}
+        {tabBtn("beds", "Beds")}
+        {tabBtn("admissions", "Admissions")}
+        {tabBtn("discharges", "Discharges")}
+      </div>
+
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+        <SearchBar value={search} onChange={setSearch} placeholder="Search bed / ward / patient..." width={280} />
+        <select style={{ ...inputStyle, width: 170 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="all">All Bed Status</option>
+          <option value="Available">Available</option>
+          <option value="Occupied">Occupied</option>
+          <option value="Cleaning">Cleaning</option>
+          <option value="Maintenance">Maintenance</option>
+        </select>
+        <GhostBtn onClick={() => exportCSV(tab === "admissions" ? filteredAdmissions : filteredBeds, `bed-ward-${tab}`)}>⬇ Export CSV</GhostBtn>
+      </div>
+
+      {loading && <Card style={{ padding:24, color:C.muted, fontFamily:C.mono }}>Loading real bed and ward data...</Card>}
+
+      {!loading && tab === "overview" && (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14 }}>
+          {wards.map((w) => {
+            const pct = Number(w.capacity || 0) ? Math.round((Number(w.occupiedBeds || 0) / Number(w.capacity || 1)) * 100) : 0;
+            const col = pct >= 100 ? C.red : pct >= 80 ? C.amber : C.green;
+            return (
+              <Card key={w._id} style={{ padding:"20px 22px", position:"relative", overflow:"hidden" }}>
+                <div style={{ position:"absolute", top:0, left:0, bottom:0, width:3, background:col }} />
+                <div style={{ fontFamily:C.serif, fontSize:16, color:C.text, fontWeight:700, marginBottom:4, paddingLeft:10 }}>{w.name}</div>
+                <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, paddingLeft:10, marginBottom:14 }}>{w.floor || "No floor"} · {w.department}</div>
+                <div style={{ height:6, background:"rgba(255,255,255,0.07)", borderRadius:4, margin:"0 10px", marginBottom:10 }}>
+                  <div style={{ height:"100%", width:`${Math.min(pct,100)}%`, background:col, borderRadius:4 }} />
+                </div>
+                <div style={{ display:"flex", justifyContent:"space-between", paddingLeft:10, paddingRight:10 }}>
+                  <span style={{ fontFamily:C.mono, fontSize:11, color:col }}>{w.occupiedBeds} occupied</span>
+                  <span style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>{w.availableBeds} free</span>
+                  <span style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>{pct}%</span>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {!loading && tab === "wards" && (
+        <Card>
+          <DataTable columns={["Ward Code","Name","Department","Floor","Type","Beds","Status","Action"]} rows={wards} renderRow={(w,i) => (
+            <tr key={w._id}>
+              <td style={{...td(i), fontFamily:C.mono, color:C.blue}}>{w.wardCode}</td>
+              <td style={{...td(i), color:C.text, fontWeight:600}}>{w.name}</td>
+              <td style={{...td(i), color:C.muted}}>{w.department}</td>
+              <td style={{...td(i), color:C.muted}}>{w.floor || "N/A"}</td>
+              <td style={{...td(i), color:C.muted}}>{w.wardType}</td>
+              <td style={{...td(i), fontFamily:C.mono, color:C.text}}>{w.occupiedBeds}/{w.capacity}</td>
+              <td style={td(i)}><Badge status={w.status} /></td>
+              <td style={td(i)}><div style={{display:"flex", gap:8}}><GhostBtn onClick={() => editWard(w)} color={C.blue}>Edit</GhostBtn><GhostBtn onClick={() => deleteWard(w)} color={C.red}>Delete</GhostBtn></div></td>
             </tr>
           )} />
-      </Card>
+        </Card>
+      )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Admit Patient to Ward">
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-          <FormField label="Patient"><Select value="" onChange={() => {}} options={[{value:"",label:"Select patient"},...PATIENTS_DATA.map(p => ({value:p.id,label:p.name}))]} style={{width:"100%"}} /></FormField>
-          <FormField label="Ward"><Select value="" onChange={() => {}} options={[{value:"",label:"Select ward"},...WARDS_DATA.map(w => ({value:w.id,label:w.name}))]} style={{width:"100%"}} /></FormField>
-          <FormField label="Bed Number"><TextInput value="" onChange={() => {}} placeholder="e.g. B-03" /></FormField>
-          <FormField label="Attending Doctor"><Select value="" onChange={() => {}} options={[{value:"",label:"Select doctor"},...DOCTORS_DATA.map(d => ({value:d.id,label:d.name}))]} style={{width:"100%"}} /></FormField>
-          <FormField label="Admission Date"><TextInput value="" onChange={() => {}} placeholder="2026-04-23" /></FormField>
-          <FormField label="Diagnosis"><TextInput value="" onChange={() => {}} placeholder="Primary diagnosis" /></FormField>
+      {!loading && tab === "beds" && (
+        <Card>
+          <DataTable columns={["Bed Code","Bed No","Ward","Type","Status","Patient","Action"]} rows={filteredBeds} renderRow={(b,i) => (
+            <tr key={b._id}>
+              <td style={{...td(i), fontFamily:C.mono, color:C.blue}}>{b.bedCode}</td>
+              <td style={{...td(i), fontFamily:C.mono, color:C.amber, fontWeight:700}}>{b.bedNumber}</td>
+              <td style={{...td(i), color:C.text}}>{b.wardName}</td>
+              <td style={{...td(i), color:C.muted}}>{b.bedType}</td>
+              <td style={td(i)}><Badge status={b.status} /></td>
+              <td style={{...td(i), color:C.muted}}>{b.patientName || "—"}</td>
+              <td style={td(i)}><div style={{display:"flex", gap:8}}><GhostBtn onClick={() => editBed(b)} color={C.blue}>Edit</GhostBtn><GhostBtn onClick={() => deleteBed(b)} color={C.red}>Delete</GhostBtn></div></td>
+            </tr>
+          )} />
+        </Card>
+      )}
+
+      {!loading && tab === "admissions" && (
+        <Card>
+          <DataTable columns={["Admission No","Patient","Ward","Bed","Date","Doctor","Condition","Status","Action"]} rows={filteredAdmissions} renderRow={(a,i) => (
+            <tr key={a._id}>
+              <td style={{...td(i), fontFamily:C.mono, color:C.blue}}>{a.admissionNo}</td>
+              <td style={{...td(i), color:C.text, fontWeight:600}}>{a.patientName}</td>
+              <td style={{...td(i), color:C.muted}}>{a.wardName}</td>
+              <td style={{...td(i), fontFamily:C.mono, color:C.amber}}>{a.bedNumber}</td>
+              <td style={{...td(i), fontFamily:C.mono, color:C.muted}}>{a.admissionDate} {a.admissionTime}</td>
+              <td style={{...td(i), color:C.muted}}>{a.doctorName || "—"}</td>
+              <td style={td(i)}><Badge status={a.condition} /></td>
+              <td style={td(i)}><Badge status={a.status} /></td>
+              <td style={td(i)}>{a.status === "Admitted" ? <GhostBtn onClick={() => openDischarge(a)} color={C.red}>Discharge</GhostBtn> : <span style={{color:C.muted, fontFamily:C.mono, fontSize:11}}>Done</span>}</td>
+            </tr>
+          )} />
+        </Card>
+      )}
+
+      {!loading && tab === "discharges" && (
+        <Card>
+          <DataTable columns={["Discharge No","Patient","Admission","Ward","Bed","Date","Type","Follow Up"]} rows={discharges} renderRow={(d,i) => (
+            <tr key={d._id}>
+              <td style={{...td(i), fontFamily:C.mono, color:C.blue}}>{d.dischargeNo}</td>
+              <td style={{...td(i), color:C.text, fontWeight:600}}>{d.patientName}</td>
+              <td style={{...td(i), fontFamily:C.mono, color:C.muted}}>{d.admissionNo}</td>
+              <td style={{...td(i), color:C.muted}}>{d.wardName}</td>
+              <td style={{...td(i), fontFamily:C.mono, color:C.amber}}>{d.bedNumber}</td>
+              <td style={{...td(i), fontFamily:C.mono, color:C.muted}}>{d.dischargeDate} {d.dischargeTime}</td>
+              <td style={td(i)}><Badge status={d.dischargeType} /></td>
+              <td style={{...td(i), fontFamily:C.mono, color:C.muted}}>{d.followUpDate || "—"}</td>
+            </tr>
+          )} />
+        </Card>
+      )}
+
+      <Modal open={wardModal} onClose={() => setWardModal(false)} title={wardForm.id ? "Edit Ward" : "Add Ward"} width={680}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+          <FormField label="Ward Name"><TextInput value={wardForm.name} onChange={(v) => setWardForm(f => ({...f, name:v}))} placeholder="General Ward A" /></FormField>
+          <FormField label="Department"><TextInput value={wardForm.department} onChange={(v) => setWardForm(f => ({...f, department:v}))} placeholder="General" /></FormField>
+          <FormField label="Floor"><TextInput value={wardForm.floor} onChange={(v) => setWardForm(f => ({...f, floor:v}))} placeholder="1st Floor" /></FormField>
+          <FormField label="Ward Type"><Select value={wardForm.wardType} onChange={(v) => setWardForm(f => ({...f, wardType:v}))} options={["General","ICU","Emergency","Maternity","Pediatric","Private"].map(v => ({value:v,label:v}))} style={{width:"100%"}} /></FormField>
+          <FormField label="Capacity"><TextInput value={wardForm.capacity} onChange={(v) => setWardForm(f => ({...f, capacity:v}))} placeholder="10" /></FormField>
+          <FormField label="Status"><Select value={wardForm.status} onChange={(v) => setWardForm(f => ({...f, status:v}))} options={["Active","Inactive","Maintenance"].map(v => ({value:v,label:v}))} style={{width:"100%"}} /></FormField>
         </div>
-        <div style={{ display:"flex", gap:10, marginTop:8 }}>
-          <AmberBtn onClick={() => setShowModal(false)}>Admit Patient</AmberBtn>
-          <GhostBtn onClick={() => setShowModal(false)}>Cancel</GhostBtn>
-        </div>
+        <FormField label="Notes"><TextInput value={wardForm.notes} onChange={(v) => setWardForm(f => ({...f, notes:v}))} placeholder="Ward notes" /></FormField>
+        <div style={{ display:"flex", gap:10 }}><AmberBtn onClick={saveWard}>{saving ? "Saving..." : "Save Ward"}</AmberBtn><GhostBtn onClick={() => setWardModal(false)}>Cancel</GhostBtn></div>
       </Modal>
+
+      <Modal open={bedModal} onClose={() => setBedModal(false)} title={bedForm.id ? "Edit Bed" : "Add Bed"} width={680}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+          <FormField label="Ward"><Select value={bedForm.wardId} onChange={(v) => setBedForm(f => ({...f, wardId:v}))} options={wardOptions} style={{width:"100%"}} /></FormField>
+          <FormField label="Bed Number"><TextInput value={bedForm.bedNumber} onChange={(v) => setBedForm(f => ({...f, bedNumber:v}))} placeholder="B-001" /></FormField>
+          <FormField label="Bed Type"><Select value={bedForm.bedType} onChange={(v) => setBedForm(f => ({...f, bedType:v}))} options={["General","ICU","Emergency","Private","Isolation"].map(v => ({value:v,label:v}))} style={{width:"100%"}} /></FormField>
+          <FormField label="Status"><Select value={bedForm.status} onChange={(v) => setBedForm(f => ({...f, status:v}))} options={["Available","Cleaning","Maintenance"].map(v => ({value:v,label:v}))} style={{width:"100%"}} /></FormField>
+        </div>
+        <FormField label="Notes"><TextInput value={bedForm.notes} onChange={(v) => setBedForm(f => ({...f, notes:v}))} placeholder="Bed notes" /></FormField>
+        <div style={{ display:"flex", gap:10 }}><AmberBtn onClick={saveBed}>{saving ? "Saving..." : "Save Bed"}</AmberBtn><GhostBtn onClick={() => setBedModal(false)}>Cancel</GhostBtn></div>
+      </Modal>
+
+      <Modal open={admitModal} onClose={() => setAdmitModal(false)} title="Admit Patient" width={760}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+          <FormField label="Patient"><Select value={admissionForm.patientId} onChange={(v) => setAdmissionForm(f => ({...f, patientId:v}))} options={patientOptions} style={{width:"100%"}} /></FormField>
+          <FormField label="Doctor"><Select value={admissionForm.doctorId} onChange={(v) => setAdmissionForm(f => ({...f, doctorId:v}))} options={doctorOptions} style={{width:"100%"}} /></FormField>
+          <FormField label="Ward"><Select value={admissionForm.wardId} onChange={(v) => setAdmissionForm(f => ({...f, wardId:v, bedId:""}))} options={wardOptions} style={{width:"100%"}} /></FormField>
+          <FormField label="Available Bed"><Select value={admissionForm.bedId} onChange={(v) => setAdmissionForm(f => ({...f, bedId:v}))} options={availableBedOptions} style={{width:"100%"}} /></FormField>
+          <FormField label="Admission Date"><TextInput value={admissionForm.admissionDate} onChange={(v) => setAdmissionForm(f => ({...f, admissionDate:v}))} placeholder="YYYY-MM-DD / optional" /></FormField>
+          <FormField label="Admission Time"><TextInput value={admissionForm.admissionTime} onChange={(v) => setAdmissionForm(f => ({...f, admissionTime:v}))} placeholder="HH:MM / optional" /></FormField>
+          <FormField label="Condition"><Select value={admissionForm.condition} onChange={(v) => setAdmissionForm(f => ({...f, condition:v}))} options={["Stable","Improving","Critical"].map(v => ({value:v,label:v}))} style={{width:"100%"}} /></FormField>
+          <FormField label="Diagnosis"><TextInput value={admissionForm.diagnosis} onChange={(v) => setAdmissionForm(f => ({...f, diagnosis:v}))} placeholder="Observation and inpatient care" /></FormField>
+        </div>
+        <FormField label="Reason"><TextInput value={admissionForm.reason} onChange={(v) => setAdmissionForm(f => ({...f, reason:v}))} placeholder="Admitted from emergency department" /></FormField>
+        <FormField label="Notes"><TextInput value={admissionForm.notes} onChange={(v) => setAdmissionForm(f => ({...f, notes:v}))} placeholder="Admission notes" /></FormField>
+        <div style={{ display:"flex", gap:10 }}><AmberBtn onClick={admitPatient}>{saving ? "Saving..." : "Admit Patient"}</AmberBtn><GhostBtn onClick={() => setAdmitModal(false)}>Cancel</GhostBtn></div>
+      </Modal>
+
+      <Modal open={dischargeModal} onClose={() => setDischargeModal(false)} title="Discharge Patient" width={760}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+          <FormField label="Discharge Type"><Select value={dischargeForm.dischargeType} onChange={(v) => setDischargeForm(f => ({...f, dischargeType:v}))} options={["Recovered","Referred","Against Advice","Deceased","Other"].map(v => ({value:v,label:v}))} style={{width:"100%"}} /></FormField>
+          <FormField label="Bed Next Status"><Select value={dischargeForm.bedNextStatus} onChange={(v) => setDischargeForm(f => ({...f, bedNextStatus:v}))} options={["Cleaning","Available","Maintenance"].map(v => ({value:v,label:v}))} style={{width:"100%"}} /></FormField>
+          <FormField label="Final Diagnosis"><TextInput value={dischargeForm.finalDiagnosis} onChange={(v) => setDischargeForm(f => ({...f, finalDiagnosis:v}))} placeholder="Observation completed" /></FormField>
+          <FormField label="Follow Up Date"><TextInput value={dischargeForm.followUpDate} onChange={(v) => setDischargeForm(f => ({...f, followUpDate:v}))} placeholder="YYYY-MM-DD" /></FormField>
+        </div>
+        <FormField label="Discharge Summary"><TextInput value={dischargeForm.dischargeSummary} onChange={(v) => setDischargeForm(f => ({...f, dischargeSummary:v}))} placeholder="Patient observed and discharged in stable condition." /></FormField>
+        <FormField label="Instructions"><TextInput value={dischargeForm.instructions} onChange={(v) => setDischargeForm(f => ({...f, instructions:v}))} placeholder="Return for follow-up if symptoms continue." /></FormField>
+        <FormField label="Notes"><TextInput value={dischargeForm.notes} onChange={(v) => setDischargeForm(f => ({...f, notes:v}))} placeholder="Discharge notes" /></FormField>
+        <div style={{ display:"flex", gap:10 }}><AmberBtn onClick={dischargePatient}>{saving ? "Saving..." : "Discharge Patient"}</AmberBtn><GhostBtn onClick={() => setDischargeModal(false)}>Cancel</GhostBtn></div>
+      </Modal>
+
+      <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted }}>
+        This page now reads and writes real wards, beds, admissions and discharges from MongoDB through /api/bedward.
+      </div>
     </div>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STAFF / USERS - REAL DATA FROM MONGODB
