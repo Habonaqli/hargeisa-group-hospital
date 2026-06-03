@@ -174,6 +174,7 @@ const STATUS_MAP = {
   "Pending":      { bg:"rgba(96,165,250,0.15)",  color:"#60A5FA", label:"Pending"      },
   "Pending Approval": { bg:"rgba(251,191,36,0.15)", color:"#FBBF24", label:"Pending Approval" },
   "Rejected":     { bg:"rgba(248,113,113,0.15)", color:"#F87171", label:"Rejected"     },
+  "Disabled":     { bg:"rgba(100,116,139,0.18)", color:"#94A3B8", label:"Disabled"     },
 };
 
 // ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
@@ -2747,37 +2748,51 @@ function InpatientsPage() {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STAFF / USERS - REAL DATA FROM MONGODB
 // ═══════════════════════════════════════════════════════════════════════════════
-function StaffPage() {
+function StaffPage({ currentUser }) {
+  const ROLE_OPTIONS = [
+    { value:"admin", label:"Admin" },
+    { value:"doctor", label:"Doctor" },
+    { value:"nurse", label:"Nurse" },
+    { value:"receptionist", label:"Receptionist" },
+    { value:"staff", label:"Staff" },
+    { value:"cashier", label:"Cashier / Finance" },
+    { value:"pharmacy", label:"Pharmacy" },
+    { value:"laboratory", label:"Laboratory" },
+    { value:"pending", label:"Pending" },
+    { value:"rejected", label:"Rejected" },
+  ];
+
+  const STATUS_OPTIONS = [
+    { value:"Active", label:"Active" },
+    { value:"Pending Approval", label:"Pending Approval" },
+    { value:"Rejected", label:"Rejected" },
+    { value:"Disabled", label:"Disabled" },
+  ];
+
+  const emptyEditForm = {
+    id: "",
+    fullName: "",
+    phone: "",
+    email: "",
+    role: "staff",
+    status: "Active",
+  };
+
   const [users, setUsers] = useState([]);
   const [q, setQ] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState(emptyEditForm);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetUser, setResetUser] = useState(null);
+  const [newPassword, setNewPassword] = useState("");
 
-  const loadUsers = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await fetch("/api/users");
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to load users");
-      }
-
-      setUsers(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setError(err.message || "Unable to load staff users");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadUsers();
-  }, [loadUsers]);
+  const isAdmin = String(currentUser?.role || "").toLowerCase() === "admin";
 
   const formatRole = (role = "staff") => {
     const clean = String(role || "staff").toLowerCase();
@@ -2787,6 +2802,9 @@ function StaffPage() {
       nurse: "Nurse",
       receptionist: "Receptionist",
       staff: "Staff",
+      cashier: "Cashier / Finance",
+      pharmacy: "Pharmacy",
+      laboratory: "Laboratory",
       pending: "Pending",
       rejected: "Rejected",
     };
@@ -2800,119 +2818,433 @@ function StaffPage() {
     return d.toLocaleDateString(undefined, { year:"numeric", month:"short", day:"numeric" });
   };
 
+  const safeParseResponse = async (response) => {
+    const text = await response.text();
+    try {
+      return text ? JSON.parse(text) : {};
+    } catch {
+      return { message: text || "Unexpected server response" };
+    }
+  };
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const params = new URLSearchParams();
+      if (q.trim()) params.set("search", q.trim());
+      if (roleFilter !== "all") params.set("role", roleFilter);
+      if (statusFilter !== "all") params.set("status", statusFilter);
+
+      const response = await fetch(`/api/users${params.toString() ? `?${params.toString()}` : ""}`);
+      const data = await safeParseResponse(response);
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to load users");
+      }
+
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.message || "Unable to load staff users");
+    } finally {
+      setLoading(false);
+    }
+  }, [q, roleFilter, statusFilter]);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
+
   const staffRows = users.map((u, index) => ({
     id: u._id || u.id || `U-${index + 1}`,
     name: u.fullName || u.name || "Unnamed User",
+    fullName: u.fullName || u.name || "",
     role: u.role || "staff",
     roleLabel: formatRole(u.role),
-    phone: u.phone || "—",
-    email: u.email || "—",
+    phone: u.phone || "",
+    email: u.email || "",
     status: u.status || "Pending Approval",
     createdAt: u.createdAt,
+    updatedAt: u.updatedAt,
+    passwordResetAt: u.passwordResetAt,
+    disabledAt: u.disabledAt,
   }));
-
-  const filtered = staffRows.filter((s) => {
-    const haystack = `${s.name} ${s.email} ${s.phone} ${s.roleLabel} ${s.status}`.toLowerCase();
-    const matchesSearch = haystack.includes(q.toLowerCase());
-    const matchesRole = roleFilter === "all" || String(s.role).toLowerCase() === roleFilter;
-    const matchesStatus = statusFilter === "all" || s.status === statusFilter;
-    return matchesSearch && matchesRole && matchesStatus;
-  });
 
   const activeCount = staffRows.filter((s) => s.status === "Active").length;
   const pendingCount = staffRows.filter((s) => s.status === "Pending Approval").length;
   const rejectedCount = staffRows.filter((s) => s.status === "Rejected").length;
+  const disabledCount = staffRows.filter((s) => s.status === "Disabled").length;
+
+  const openEdit = (user) => {
+    setError("");
+    setMessage("");
+    setEditForm({
+      id: user.id,
+      fullName: user.fullName || user.name || "",
+      phone: user.phone || "",
+      email: user.email || "",
+      role: user.role || "staff",
+      status: user.status || "Active",
+    });
+    setEditOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!isAdmin) {
+      setError("Only admin can edit staff accounts.");
+      return;
+    }
+
+    if (!editForm.fullName.trim() || !editForm.phone.trim() || !editForm.email.trim()) {
+      setError("Full name, phone, and email are required.");
+      return;
+    }
+
+    setBusy("edit");
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+
+      const data = await safeParseResponse(response);
+      if (!response.ok) throw new Error(data.message || "User update failed");
+
+      setMessage("User updated successfully");
+      setEditOpen(false);
+      setEditForm(emptyEditForm);
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Unable to update user");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const openReset = (user) => {
+    setError("");
+    setMessage("");
+    setResetUser(user);
+    setNewPassword("");
+    setResetOpen(true);
+  };
+
+  const resetPassword = async () => {
+    if (!isAdmin) {
+      setError("Only admin can reset passwords.");
+      return;
+    }
+
+    if (!resetUser?.id) {
+      setError("User is missing.");
+      return;
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      setError("New password must be at least 6 characters.");
+      return;
+    }
+
+    setBusy("reset");
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: resetUser.id, newPassword }),
+      });
+
+      const data = await safeParseResponse(response);
+      if (!response.ok) throw new Error(data.message || "Password reset failed");
+
+      setMessage(`Password reset successfully for ${resetUser.name}`);
+      setResetOpen(false);
+      setResetUser(null);
+      setNewPassword("");
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Unable to reset password");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const deactivateUser = async (user) => {
+    if (!isAdmin) {
+      setError("Only admin can disable accounts.");
+      return;
+    }
+
+    if (String(user.id) === String(currentUser?.id)) {
+      setError("You cannot disable your own active admin session.");
+      return;
+    }
+
+    if (!window.confirm(`Disable account for ${user.name}? The user will not be able to login.`)) return;
+
+    setBusy(user.id);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: user.id, mode: "deactivate" }),
+      });
+
+      const data = await safeParseResponse(response);
+      if (!response.ok) throw new Error(data.message || "User disable failed");
+
+      setMessage("User disabled successfully");
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Unable to disable user");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const deleteUser = async (user) => {
+    if (!isAdmin) {
+      setError("Only admin can delete accounts.");
+      return;
+    }
+
+    if (String(user.id) === String(currentUser?.id)) {
+      setError("You cannot delete your own active admin account.");
+      return;
+    }
+
+    const confirmText = window.prompt(
+      `Permanent delete is dangerous.\nType DELETE to permanently delete ${user.name}.`
+    );
+
+    if (confirmText !== "DELETE") return;
+
+    setBusy(user.id);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: user.id, mode: "delete" }),
+      });
+
+      const data = await safeParseResponse(response);
+      if (!response.ok) throw new Error(data.message || "User delete failed");
+
+      setMessage("User deleted successfully");
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Unable to delete user");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const quickActivate = async (user) => {
+    setBusy(user.id);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: user.id,
+          fullName: user.fullName || user.name,
+          phone: user.phone,
+          email: user.email,
+          role: user.role === "pending" || user.role === "rejected" ? "staff" : user.role,
+          status: "Active",
+        }),
+      });
+
+      const data = await safeParseResponse(response);
+      if (!response.ok) throw new Error(data.message || "Activation failed");
+
+      setMessage("User activated successfully");
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Unable to activate user");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const inputStyle = {
+    width:"100%",
+    background:"rgba(255,255,255,0.06)",
+    border:`1px solid ${C.border}`,
+    borderRadius:10,
+    padding:"10px 12px",
+    color:C.text,
+    fontFamily:C.mono,
+    fontSize:12,
+    outline:"none",
+  };
 
   return (
     <div>
       <SectionHeader
-        title="Staff & Users"
+        title="Staff Account Management"
         subtitle={`${staffRows.length} real registered users from MongoDB`}
-        action={<AmberBtn onClick={loadUsers}>{loading ? "Loading..." : "Refresh Users"}</AmberBtn>}
+        action={
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <GhostBtn onClick={loadUsers}>{loading ? "Loading..." : "Refresh Users"}</GhostBtn>
+            <GhostBtn onClick={() => exportCSV(staffRows, "staff-account-management")}>⬇ Export</GhostBtn>
+          </div>
+        }
       />
 
-      {error && (
+      <Card style={{ padding:16, marginBottom:16, border:"1px solid rgba(245,158,11,0.24)", background:"rgba(245,158,11,0.06)" }}>
+        <div style={{ fontFamily:C.mono, fontSize:11, color:C.amber, fontWeight:700, marginBottom:6 }}>
+          🔐 Admin Control Rule
+        </div>
+        <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted, lineHeight:1.7 }}>
+          Admin has full access. Other users should only see work related to their role. Passwords are never shown; admin can only reset them securely.
+          Permanent delete is restricted and should be used only when needed. Disable is safer for real hospital operations.
+        </div>
+      </Card>
+
+      {(message || error) && (
         <div style={{
-          background:"rgba(248,113,113,0.12)",
-          border:"1px solid rgba(248,113,113,0.35)",
-          color:C.red,
+          background:error ? "rgba(248,113,113,0.12)" : "rgba(52,211,153,0.12)",
+          border:`1px solid ${error ? "rgba(248,113,113,0.35)" : "rgba(52,211,153,0.35)"}`,
+          color:error ? C.red : C.green,
           padding:"12px 14px",
           borderRadius:12,
           fontFamily:C.mono,
           fontSize:12,
           marginBottom:16,
         }}>
-          ❌ {error}
+          {error ? "❌" : "✅"} {error || message}
         </div>
       )}
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:20 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:14, marginBottom:20 }}>
         {[
           { label:"Total Users", val:staffRows.length, color:C.blue, icon:"👥" },
           { label:"Active", val:activeCount, color:C.green, icon:"✅" },
-          { label:"Pending Approval", val:pendingCount, color:C.amber, icon:"⏳" },
+          { label:"Pending", val:pendingCount, color:C.amber, icon:"⏳" },
           { label:"Rejected", val:rejectedCount, color:C.red, icon:"⛔" },
+          { label:"Disabled", val:disabledCount, color:C.muted, icon:"🔒" },
         ].map((s) => (
-          <Card key={s.label} style={{ padding:22, borderBottom:`2px solid ${s.color}` }}>
+          <Card key={s.label} style={{ padding:18, borderBottom:`2px solid ${s.color}` }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
-                <div style={{ fontFamily:C.mono, fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:".08em" }}>{s.label}</div>
-                <div style={{ fontFamily:C.serif, fontSize:30, color:s.color, marginTop:8 }}>{s.val}</div>
+                <div style={{ fontFamily:C.mono, fontSize:10, color:C.muted, textTransform:"uppercase", letterSpacing:".08em" }}>{s.label}</div>
+                <div style={{ fontFamily:C.serif, fontSize:28, color:s.color, marginTop:8 }}>{s.val}</div>
               </div>
-              <div style={{ fontSize:24, opacity:.75 }}>{s.icon}</div>
+              <div style={{ fontSize:22, opacity:.75 }}>{s.icon}</div>
             </div>
           </Card>
         ))}
       </div>
 
       <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
-        <SearchBar value={q} onChange={setQ} placeholder="Search real staff..." />
+        <SearchBar value={q} onChange={setQ} placeholder="Search staff, email, phone..." width={260} />
         <Select
           value={roleFilter}
           onChange={setRoleFilter}
-          options={[
-            { value:"all", label:"All Roles" },
-            { value:"admin", label:"Admin" },
-            { value:"doctor", label:"Doctor" },
-            { value:"nurse", label:"Nurse" },
-            { value:"receptionist", label:"Receptionist" },
-            { value:"staff", label:"Staff" },
-          ]}
+          options={[{ value:"all", label:"All Roles" }, ...ROLE_OPTIONS.filter((r) => !["pending","rejected"].includes(r.value))]}
         />
         <Select
           value={statusFilter}
           onChange={setStatusFilter}
-          options={[
-            { value:"all", label:"All Statuses" },
-            { value:"Active", label:"Active" },
-            { value:"Pending Approval", label:"Pending Approval" },
-            { value:"Rejected", label:"Rejected" },
-          ]}
+          options={[{ value:"all", label:"All Statuses" }, ...STATUS_OPTIONS]}
         />
-        <GhostBtn onClick={() => exportCSV(filtered, "real-staff-users")}>⬇ Export</GhostBtn>
       </div>
 
       <Card>
         <DataTable
-          columns={["User ID", "Name", "Role", "Email", "Phone", "Registered", "Status"]}
-          rows={filtered}
+          columns={["User ID", "Name", "Role", "Email", "Phone", "Registered", "Status", "Actions"]}
+          rows={staffRows}
+          pageSize={10}
           renderRow={(s, i) => (
             <tr key={s.id}>
               <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.blue, maxWidth:170, overflow:"hidden", textOverflow:"ellipsis"}}>{s.id}</td>
               <td style={{...td(i), color:C.text, fontSize:13, fontWeight:600}}>{s.name}</td>
               <td style={{...td(i), fontSize:12, color:C.text}}>{s.roleLabel}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.blue}}>{s.email}</td>
-              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{s.phone}</td>
+              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.blue}}>{s.email || "—"}</td>
+              <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{s.phone || "—"}</td>
               <td style={{...td(i), fontFamily:C.mono, fontSize:11, color:C.muted}}>{formatDate(s.createdAt)}</td>
               <td style={td(i)}><Badge status={s.status} /></td>
+              <td style={td(i)}>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  <GhostBtn onClick={() => openEdit(s)} color={C.blue}>Edit</GhostBtn>
+                  <GhostBtn onClick={() => openReset(s)} color={C.amber}>Reset</GhostBtn>
+                  {s.status !== "Active" && <GhostBtn onClick={() => quickActivate(s)} color={C.green}>Activate</GhostBtn>}
+                  <GhostBtn onClick={() => deactivateUser(s)} color={C.red}>Disable</GhostBtn>
+                  <GhostBtn onClick={() => deleteUser(s)} color={C.red}>Delete</GhostBtn>
+                </div>
+              </td>
             </tr>
           )}
         />
       </Card>
 
       <div style={{ marginTop:14, color:C.muted, fontFamily:C.mono, fontSize:11 }}>
-        This page now reads from MongoDB users. Demo staff data is no longer displayed here.
+        This page reads and updates real MongoDB users through /api/users. Passwords are hidden and can only be reset.
       </div>
+
+      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Staff / User Account" width={620}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+          <FormField label="Full Name">
+            <input style={inputStyle} value={editForm.fullName} onChange={(e) => setEditForm((f) => ({ ...f, fullName:e.target.value }))} />
+          </FormField>
+          <FormField label="Phone">
+            <input style={inputStyle} value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone:e.target.value }))} />
+          </FormField>
+          <FormField label="Email">
+            <input style={inputStyle} value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email:e.target.value }))} />
+          </FormField>
+          <FormField label="Role">
+            <Select value={editForm.role} onChange={(value) => setEditForm((f) => ({ ...f, role:value }))} options={ROLE_OPTIONS} style={{ width:"100%" }} />
+          </FormField>
+          <FormField label="Status">
+            <Select value={editForm.status} onChange={(value) => setEditForm((f) => ({ ...f, status:value }))} options={STATUS_OPTIONS} style={{ width:"100%" }} />
+          </FormField>
+        </div>
+
+        <div style={{ display:"flex", gap:10, marginTop:12 }}>
+          <AmberBtn onClick={saveEdit}>{busy === "edit" ? "Saving..." : "Save Changes"}</AmberBtn>
+          <GhostBtn onClick={() => setEditOpen(false)}>Cancel</GhostBtn>
+        </div>
+      </Modal>
+
+      <Modal open={resetOpen} onClose={() => setResetOpen(false)} title="Reset User Password" width={520}>
+        <div style={{ fontFamily:C.mono, fontSize:12, color:C.muted, lineHeight:1.6, marginBottom:14 }}>
+          Resetting password for: <span style={{ color:C.text, fontWeight:700 }}>{resetUser?.name}</span><br />
+          The old password will not be shown. A new secure bcrypt hash will be saved.
+        </div>
+
+        <FormField label="New Password">
+          <input
+            type="password"
+            style={inputStyle}
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="Minimum 6 characters"
+          />
+        </FormField>
+
+        <div style={{ display:"flex", gap:10 }}>
+          <AmberBtn onClick={resetPassword}>{busy === "reset" ? "Resetting..." : "Reset Password"}</AmberBtn>
+          <GhostBtn onClick={() => setResetOpen(false)}>Cancel</GhostBtn>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -4011,6 +4343,9 @@ function UserApprovalsPage() {
     { value:"doctor", label:"Doctor" },
     { value:"nurse", label:"Nurse" },
     { value:"receptionist", label:"Receptionist" },
+    { value:"cashier", label:"Cashier / Finance" },
+    { value:"pharmacy", label:"Pharmacy" },
+    { value:"laboratory", label:"Laboratory" },
     { value:"admin", label:"Admin" },
   ];
 
@@ -4237,20 +4572,20 @@ function UserApprovalsPage() {
 //  NAV CONFIG + RBAC
 // ═══════════════════════════════════════════════════════════════════════════════
 const ALL_NAV = [
-  { id:"dashboard",     label:"Dashboard",       icon:"⬡", roles:["admin","doctor","receptionist","nurse","staff"] },
-  { id:"emergency",     label:"Emergency",        icon:"🚨", roles:["admin","doctor","nurse","staff"] },
-  { id:"patients",      label:"Patients",         icon:"👥", roles:["admin","doctor","receptionist","nurse","staff"] },
-  { id:"appointments",  label:"Appointments",     icon:"📅", roles:["admin","doctor","receptionist","staff"] },
-  { id:"inpatients",    label:"Inpatients",       icon:"🏥", roles:["admin","doctor","nurse","staff"] },
-  { id:"prescriptions", label:"Prescriptions",    icon:"💊", roles:["admin","doctor"] },
-  { id:"laboratory",    label:"Laboratory",       icon:"🔬", roles:["admin","doctor","nurse","staff"] },
-  { id:"pharmacy",      label:"Pharmacy",         icon:"💉", roles:["admin","receptionist","nurse","staff"] },
+  { id:"dashboard",     label:"Dashboard",       icon:"⬡", roles:["admin","doctor","nurse","receptionist","staff","cashier","pharmacy","laboratory"] },
+  { id:"emergency",     label:"Emergency",        icon:"🚨", roles:["admin","doctor","nurse"] },
+  { id:"patients",      label:"Patients",         icon:"👥", roles:["admin","doctor","nurse","receptionist"] },
+  { id:"appointments",  label:"Appointments",     icon:"📅", roles:["admin","doctor","receptionist"] },
+  { id:"inpatients",    label:"Inpatients",       icon:"🏥", roles:["admin","doctor","nurse"] },
+  { id:"prescriptions", label:"Prescriptions",    icon:"💊", roles:["admin","doctor","pharmacy"] },
+  { id:"laboratory",    label:"Laboratory",       icon:"🔬", roles:["admin","doctor","laboratory"] },
+  { id:"pharmacy",      label:"Pharmacy",         icon:"💉", roles:["admin","pharmacy"] },
   { id:"staff",         label:"Staff",            icon:"👔", roles:["admin"] },
   { id:"approvals",     label:"User Approvals",   icon:"✅", roles:["admin"] },
   { id:"doctors",       label:"Doctors",          icon:"🩺", roles:["admin","receptionist"] },
-  { id:"billing",       label:"Billing",          icon:"💳", roles:["admin","receptionist"] },
+  { id:"billing",       label:"Billing",          icon:"💳", roles:["admin","cashier","receptionist"] },
   { id:"reports",       label:"Reports",          icon:"📊", roles:["admin"] },
-  { id:"notifications", label:"Notifications",    icon:"🔔", roles:["admin","doctor","receptionist","nurse","staff"] },
+  { id:"notifications", label:"Notifications",    icon:"🔔", roles:["admin","doctor","nurse","receptionist","staff","cashier","pharmacy","laboratory"] },
   { id:"settings",      label:"Settings",         icon:"⚙️", roles:["admin"] },
 ];
 
@@ -4752,7 +5087,13 @@ export default function App() {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const visibleNav = ALL_NAV.filter(n => n.roles.includes(user.role));
+  const visibleNav = useMemo(() => ALL_NAV.filter(n => n.roles.includes(user.role)), [user.role]);
+
+  useEffect(() => {
+    if (page !== "patient_profile" && !visibleNav.some((item) => item.id === page)) {
+      setPage("dashboard");
+    }
+  }, [page, visibleNav]);
 
   const handleViewPatient = (p) => { setSelectedPatient(p); setPage("patient_profile"); };
   const handleBack = () => { setSelectedPatient(null); setPage("patients"); };
@@ -4768,7 +5109,7 @@ export default function App() {
       case "pharmacy":      return <PharmacyPage />;
       case "laboratory":    return <LaboratoryPage />;
       case "inpatients":    return <InpatientsPage />;
-      case "staff":         return <StaffPage />;
+      case "staff":         return <StaffPage currentUser={user} />;
       case "approvals":     return <UserApprovalsPage />;
       case "prescriptions": return <PrescriptionsPage />;
       case "emergency":     return <EmergencyPage />;

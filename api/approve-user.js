@@ -17,7 +17,13 @@ if (!clientPromise) {
 }
 
 async function getBody(req) {
-  if (req.body) return req.body;
+  if (req.body && typeof req.body === "object") {
+    return req.body;
+  }
+
+  if (typeof req.body === "string") {
+    return req.body ? JSON.parse(req.body) : {};
+  }
 
   return new Promise((resolve, reject) => {
     let data = "";
@@ -28,7 +34,7 @@ async function getBody(req) {
 
     req.on("end", () => {
       try {
-        resolve(JSON.parse(data || "{}"));
+        resolve(data ? JSON.parse(data) : {});
       } catch (error) {
         reject(error);
       }
@@ -66,7 +72,16 @@ export default async function handler(req, res) {
       });
     }
 
-    const allowedRoles = ["admin", "doctor", "nurse", "receptionist", "staff"];
+    const allowedRoles = [
+      "admin",
+      "doctor",
+      "nurse",
+      "receptionist",
+      "staff",
+      "cashier",
+      "pharmacy",
+      "laboratory",
+    ];
 
     if (action === "approve" && !allowedRoles.includes(role)) {
       return res.status(400).json({
@@ -83,11 +98,13 @@ export default async function handler(req, res) {
             role,
             status: "Active",
             approvedAt: new Date(),
+            updatedAt: new Date(),
           }
         : {
             role: "rejected",
             status: "Rejected",
             rejectedAt: new Date(),
+            updatedAt: new Date(),
           };
 
     const result = await db.collection("users").updateOne(
