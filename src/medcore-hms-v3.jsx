@@ -2760,7 +2760,7 @@ function StaffPage() {
     setError("");
 
     try {
-      const response = await fetch("/api/users");
+      const response = await fetch("/api/auth?type=users");
       const data = await response.json();
 
       if (!response.ok) {
@@ -4270,7 +4270,7 @@ function UserApprovalsPage() {
         role: action === "approve" ? (roles[userId] || "staff") : "staff",
       };
 
-      const response = await fetch("/api/approve-user", {
+      const response = await fetch("/api/auth?type=approve-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -4482,7 +4482,7 @@ function PublicLoginPage({ onLogin, onShowRegister }) {
     setError("");
 
     try {
-      const response = await fetch("/api/login", {
+      const response = await fetch("/api/auth?type=login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -4682,7 +4682,7 @@ function PublicRegisterPage() {
     setError("");
 
     try {
-      const response = await fetch("/api/register", {
+      const response = await fetch("/api/auth?type=register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
